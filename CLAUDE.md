@@ -2,6 +2,12 @@
 
 Two-player hot-seat card game in the browser. Each player is a "firecrafting wizard" who summons hellfire creatures (Dante's Inferno / biblical theme) to reduce the other wizard's health to 0. Plain ES modules, no build step, no dependencies.
 
+## Hosting
+
+- Public repo: https://github.com/mkerin/firecraft. GitHub Pages serves `main` (root) at https://mkerin.github.io/firecraft/, and every push to `main` redeploys within a minute or two. `.nojekyll` makes Pages serve the files as-is.
+- Use relative asset paths only (the site lives under `/firecraft/`, not `/`).
+- Players' saves and decks are in their own browser's localStorage. Changing the save shape can break "Continue" for live players, so keep old saves loadable or discard them gracefully.
+
 ## Run & test
 
 - Serve: `.venv/bin/python -m http.server 8123` (also the `firecraft` config in `.claude/launch.json`), open http://localhost:8123. ES modules need HTTP; `file://` won't work.
