@@ -1,10 +1,12 @@
-// Browser UI: title -> deck building (P1, P2) -> hot-seat battle. All game rules live in engine.js.
+// Browser UI: title -> deck building -> battle, either hot-seat (two people, one device) or against the
+// computer (ai.js). All game rules live in engine.js.
 
 import {
   CARDS, CARDS_BY_ID, TYPES, TYPE_INFO, BEATS, BEAT_VERB, ABILITIES, RULES,
   card, hasAbility, maxCopiesOf, deckSize, deckToList, validateDeck, fillWithEmbers, randomDeck,
 } from './cards.js';
 import * as E from './engine.js';
+import * as AI from './ai.js';
 import { ART_DEFS, cardArt } from './art.js';
 
 const store = {
@@ -20,6 +22,8 @@ const store = {
 };
 
 const SAVE_KEY = 'firecraft.save';
+const CPU_NAME = 'Virgil';
+const CPU_INDEX = 1; // against the computer, the human is always player 0
 
 // blocks: [{ blocker, attacker }] in the order chosen; picking: a blocker waiting for its attacker to be clicked.
 const freshSelection = () => ({ attackers: [], blocks: [], picking: null, moloch: null });
@@ -38,6 +42,12 @@ const app = {
   knownUids: new Set(),
   openInfo: new Set(), // uids whose info drawer is pinned open
   confirming: null, // action awaiting its confirming second click
+  cpu: null, // index of the computer player, or null for hot-seat
+};
+
+const cpuActing = () => {
+  const g = app.game;
+  return app.cpu !== null && g && g.winner === null && AI.actor(g).index === app.cpu;
 };
 
 const root = document.getElementById('app');
@@ -144,10 +154,13 @@ function renderTitle() {
     <p class="tagline">Two firecrafting wizards. Fifty cards each. One walks out of the inferno.</p>
     <div class="names">
       <label>First wizard<input data-name="0" value="${esc(app.names[0])}" maxlength="20"></label>
-      <label>Second wizard<input data-name="1" value="${esc(app.names[1])}" maxlength="20"></label>
+      <label>Second wizard <small>(hot-seat)</small><input data-name="1" value="${esc(app.names[1])}" maxlength="20"></label>
     </div>
     ${savedBattleHtml()}
-    <button class="btn ${store.get(SAVE_KEY) ? '' : 'primary'} big" data-action="start-build">Forge your decks</button>
+    <div class="modes">
+      <button class="btn ${store.get(SAVE_KEY) ? '' : 'primary'} big" data-action="start-cpu" title="You build a deck; ${CPU_NAME} brings a random one">Play against ${CPU_NAME}</button>
+      <button class="btn big" data-action="start-build" title="Two players taking turns on this device">Two players, one device</button>
+    </div>
     <section class="rules">
       <h3>How a turn works</h3>
       <ol>
@@ -189,7 +202,7 @@ function renderBuild() {
   return `<div class="builder">
     <div class="builder-main">
       <header class="topbar">
-        <div><div class="eyebrow">Deck ${b.pi + 1} of 2</div><h2>${esc(app.names[b.pi])}, forge your deck</h2></div>
+        <div><div class="eyebrow">${app.cpu !== null ? `${CPU_NAME} brings a random deck` : `Deck ${b.pi + 1} of 2`}</div><h2>${esc(app.names[b.pi])}, forge your deck</h2></div>
         <div class="filters">${filters.map((f) => `<button class="pill ${f === b.filter ? 'on' : ''} ${TYPES.includes(f) ? `t-${f}` : ''}" data-action="filter" data-filter="${f}">${filterLabel(f)}</button>`).join('')}</div>
       </header>
       <p class="hint">Click a card to add it, right-click (or −) to remove. Take as many copies as you like, except Lucifer (1) and Hellfire Embers (2).</p>
@@ -346,7 +359,7 @@ function unitHtml(p, inst) {
   if (app.openInfo.has(inst.uid)) cls.push('info-open');
   const sick = isActive && inst.summonedTurn === g.turn && !hasAbility(def, 'charge') && !hasAbility(def, 'cannot-attack');
   const def2 = E.currentDef(inst);
-  const martyrBtn = E.canMartyr(g, p.index, inst.uid).ok
+  const martyrBtn = E.canMartyr(g, p.index, inst.uid).ok && p.index !== app.cpu
     ? `<button class="mini-btn" data-action="martyr" data-owner="${p.index}" data-uid="${inst.uid}" title="Destroy it to restore 6 health">Martyr +6</button>`
     : '';
   return `<div class="${cls.join(' ')}" data-action="unit" data-uid="${inst.uid}" data-owner="${p.index}" data-card="${def.id}" title="${esc(title)}">
@@ -458,7 +471,12 @@ function phaseBar() {
   let buttons = '';
   let extra = '';
 
-  if (g.phase === 'summon') {
+  if (cpuActing()) {
+    const doing = { summon: 'is summoning', attack: 'is choosing attackers', block: 'is choosing blockers', end: 'surveys the field' };
+    prompt = `<span class="thinking">${esc(CPU_NAME)} ${doing[g.phase] || 'is thinking'}…</span>`;
+    if (g.phase === 'block') extra = combatHtml(E.previewCombat(g, []));
+    if (g.phase === 'end' && g.lastCombat) extra = combatHtml(g.lastCombat);
+  } else if (g.phase === 'summon') {
     if (app.sel.moloch) {
       prompt = 'Choose one of your creatures to sacrifice to Moloch.';
       buttons = '<button class="btn ghost" data-action="cancel-moloch">Cancel</button>';
@@ -510,11 +528,14 @@ function inspectorDefault() {
 
 function renderBattle() {
   const g = app.game;
-  const me = E.activePlayer(g);
-  const foe = E.defendingPlayer(g);
-  const hideHand = g.phase === 'block';
+  // Hot-seat: the active player sits at the bottom, and their hand is hidden while the defender holds the device.
+  // Against the computer, the human always sits at the bottom and always sees their own hand.
+  const vsCpu = app.cpu !== null;
+  const me = vsCpu ? g.players[1 - app.cpu] : E.activePlayer(g);
+  const foe = g.players[1 - me.index];
+  const hideHand = !vsCpu && g.phase === 'block';
   // Whoever holds the device sees their own secret entries (e.g. the names of cards they drew).
-  const viewer = hideHand ? foe.index : me.index;
+  const viewer = vsCpu ? me.index : hideHand ? foe.index : me.index;
   const log = g.log.slice(-120).reverse().map((e) => {
     const text = e.secret?.player === viewer ? e.secret.text : e.text;
     return `<li class="log-${e.kind}"><span class="lt">${e.turn}</span>${esc(text)}</li>`;
@@ -549,7 +570,8 @@ function renderBattle() {
 // ---------- flow ----------
 
 function startGame(firstPlayer = 0) {
-  app.game = E.createGame({ decks: app.decks.map(deckToList), names: [...app.names], firstPlayer });
+  const names = app.cpu !== null ? [app.names[0], CPU_NAME] : [...app.names];
+  app.game = E.createGame({ decks: app.decks.map(deckToList), names, firstPlayer });
   app.knownUids = new Set();
   app.openInfo = new Set();
   showTurnPass('The battle begins.');
@@ -560,7 +582,7 @@ function saveGame() {
   const g = app.game;
   if (!g) return;
   if (g.winner !== null) { store.remove(SAVE_KEY); return; }
-  store.set(SAVE_KEY, { game: { ...g, rng: undefined }, decks: app.decks, names: app.names, savedAt: Date.now() });
+  store.set(SAVE_KEY, { game: { ...g, rng: undefined }, decks: app.decks, names: app.names, cpu: app.cpu, savedAt: Date.now() });
 }
 
 function resumeGame() {
@@ -568,13 +590,15 @@ function resumeGame() {
   if (!save?.game) return;
   app.game = { ...save.game, rng: Math.random };
   app.decks = save.decks;
-  app.names = save.names;
+  app.cpu = save.cpu ?? null;
+  if (app.cpu === null) app.names = save.names;
   app.sel = freshSelection();
   app.drawnUid = null;
   app.openInfo = new Set();
   app.knownUids = new Set(app.game.players.flatMap((p) => p.field.map((c) => c.uid)));
   // Whoever has to act next takes the device: the defender mid-block, otherwise the active player.
   const g = app.game;
+  if (app.cpu !== null) { app.screen = 'battle'; return; }
   const actor = g.phase === 'block' ? E.defendingPlayer(g) : E.activePlayer(g);
   app.pass = {
     title: g.phase === 'block' ? `${actor.name} is under attack` : `Welcome back. ${actor.name}'s turn`,
@@ -590,7 +614,9 @@ function showTurnPass(prefix = '') {
   app.sel = freshSelection();
   if (g.winner !== null) { app.screen = 'battle'; return; }
   const p = E.activePlayer(g);
-  app.drawnUid = p.hand.at(-1)?.uid ?? null;
+  app.drawnUid = p.index === app.cpu ? null : p.hand.at(-1)?.uid ?? null;
+  // No device to pass against the computer.
+  if (app.cpu !== null) { app.screen = 'battle'; return; }
   app.pass = {
     title: `${prefix ? `${prefix} ` : ''}${p.name}'s turn`,
     sub: 'Pass the device. Your hand will be revealed.',
@@ -612,7 +638,8 @@ function run(result) {
 }
 
 const actions = {
-  'start-build': () => startBuild(0),
+  'start-build': () => { app.cpu = null; app.decks = [null, null]; startBuild(0); },
+  'start-cpu': () => { app.cpu = CPU_INDEX; app.decks = [null, null]; startBuild(0); },
   filter: (d) => { app.build.filter = d.filter; },
   inc: (d) => {
     const c = app.build.counts;
@@ -631,6 +658,10 @@ const actions = {
     const pi = app.build.pi;
     app.decks[pi] = { ...app.build.counts };
     store.set(`firecraft.deck.${pi}`, app.decks[pi]);
+    if (app.cpu !== null) {
+      app.decks[app.cpu] = randomDeck();
+      return startGame(Math.random() < 0.5 ? 0 : 1);
+    }
     if (pi === 1) return startGame(0);
     app.pass = {
       title: `Pass to ${app.names[1]}`,
@@ -730,11 +761,39 @@ function render() {
   root.innerHTML = screens[app.screen]();
   app.toast = null;
   app.flash = [false, false];
+  scheduleCpu();
+}
+
+// ---------- the computer's turn ----------
+
+let cpuTimer = null;
+
+// One computer action at a time, with pauses so the human can follow what happened.
+function scheduleCpu() {
+  if (cpuTimer || app.screen !== 'battle' || !cpuActing()) return;
+  const g = app.game;
+  const action = AI.chooseAction(g);
+  if (!action) return;
+  // Linger on a combat result the human was part of before the computer ends its turn.
+  const delay = action.type === 'end-turn' && g.lastCombat ? 2600 : action.type === 'to-attack' ? 500 : 1000;
+  cpuTimer = setTimeout(() => {
+    cpuTimer = null;
+    if (app.game !== g || app.screen !== 'battle' || !cpuActing()) return;
+    const before = g.players.map((p) => p.health);
+    const result = AI.applyAction(g, action);
+    if (!result.ok) { console.error('Computer action refused', action, result.reason); return; }
+    app.flash = g.players.map((p, i) => p.health < before[i]);
+    if (action.type === 'end-turn') showTurnPass();
+    saveGame();
+    render();
+  }, delay);
 }
 
 root.addEventListener('click', (e) => {
   const el = e.target.closest('[data-action]');
   if (!el || el.disabled) return;
+  // While the computer is acting, the board is read-only apart from inspecting cards and leaving.
+  if (app.screen === 'battle' && cpuActing() && !['info', 'quit'].includes(el.dataset.action)) return;
   const before = app.game?.players.map((p) => p.health);
   // A confirmation only lasts one click: clicking anything else cancels it.
   const confirmed = app.confirming === el.dataset.action;

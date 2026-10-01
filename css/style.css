@@ -142,6 +142,10 @@ h1, h2, h3, h4 { font-family: var(--display); margin: 0; letter-spacing: .04em; 
   border-radius: 6px; padding: .5em .8em; width: 220px; text-align: center;
 }
 .names input:focus { outline: none; border-color: var(--fire); box-shadow: 0 0 10px #ff6a1a55; }
+.names label small { text-transform: none; letter-spacing: 0; font-size: .9em; opacity: .7; }
+.modes { display: flex; gap: .8rem; flex-wrap: wrap; justify-content: center; }
+.thinking { font-style: italic; color: var(--muted); animation: thinking 1.2s ease-in-out infinite alternate; }
+@keyframes thinking { from { opacity: .45; } to { opacity: 1; } }
 .saved-battle {
   background: #1a0a07e6; border: 1px solid var(--fire); border-radius: 12px; padding: 1rem 1.5rem;
   box-shadow: 0 0 30px #ff3a0033; display: flex; flex-direction: column; align-items: center; gap: .6rem; position: relative;

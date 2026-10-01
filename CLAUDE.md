@@ -18,8 +18,9 @@ Two-player hot-seat card game in the browser. Each player is a "firecrafting wiz
 
 - `js/cards.js`: card pool, `RULES` constants, type wheel (`BEATS`), ability text (`ABILITIES`), deck helpers (`validateDeck`, `fillWithEmbers`, `randomDeck`). No DOM access.
 - `js/engine.js`: all game rules. Pure and DOM-free so the UI, tests and a future AI player share it. Actions mutate the state and return `{ ok, reason }` instead of throwing. Blocks are `[{ blocker, attacker }]` uids in the defender's order. `previewCombat(state, blocks)` computes the result without mutating; `declareBlock` validates it (`blockProblem`) and applies it.
+- `js/ai.js`: the computer opponent ("Virgil"). `chooseAction(state)` returns the next action for whoever must act (the defender during a block, otherwise the active player), and `applyAction` performs it through the engine. Rules: martyr when at or below 30% health; summon the costliest affordable creature (Moloch eats the weakest non-Lucifer creature, and only if that's an upgrade); attack with everything that can (attackers never take damage except from Salt); block greedily, adding whichever single blocker→attacker pairing most improves a score until none does. The score: −damage (×2 at low health), −1000 for lethal, −worth of lost blockers, +worth of salted attackers. It never redraws. Tests are in `tests/ai.test.mjs`.
 - `js/art.js`: a hand-built SVG scene (200×140) per card. Shared gradients/filters are in `ART_DEFS`, injected into the page once.
-- `js/ui.js`: screens (title → deck builder P1 → pass → builder P2 → pass → battle). Re-renders `#app` via `innerHTML`, with event delegation on `data-action`.
+- `js/ui.js`: screens (title → deck builder P1 → pass → builder P2 → pass → battle; vs computer: title → builder → battle). Re-renders `#app` via `innerHTML`, with event delegation on `data-action`.
 - `css/style.css`: all styling. Type colors come from `.t-<type>` setting `--tc`.
 
 ## Rules as implemented (agreed with the user)
@@ -36,6 +37,8 @@ Two-player hot-seat card game in the browser. Each player is a "firecrafting wiz
 - Cost is roughly (ATK+DEF)/4, adjusted for abilities.
 
 ## UI behaviour worth preserving
+
+- **Two modes:** "Play against Virgil" (`app.cpu = 1`: the human is player 0, Virgil gets `randomDeck()`, the first player is random, and there are no pass screens) and "Two players, one device" (hot-seat, `app.cpu = null`). `cpu` is stored in the save. Against the computer, the human always sits at the bottom and sees their own hand. `scheduleCpu()` runs after every render and performs one computer action per timeout (about 1s, or 2.6s to linger on a combat result). Clicks are ignored while the computer acts, except info and quit.
 
 - Hot-seat privacy: a pass-the-device screen between turns. The attacker's hand shows as card backs during the block phase. Chronicle log entries can carry a `secret: { player, text }` (e.g. drawn card names), shown only to the player holding the device; everyone else sees the public text.
 - The chronicle logs draws, Embers paid for each summon, discards, triggers, and combat results.
@@ -54,5 +57,9 @@ Two-player hot-seat card game in the browser. Each player is a "firecrafting wiz
 
 ## Ideas / future work
 
-- Planned: AI-vs-AI or player-vs-Claude battles driven by `engine.js`.
-- Balance: random-game simulations favour the first player. Skipping the first player's opening draw is the suggested fix (not yet done).
+The user asked for the first two items (2026-10-01) but said not to start them yet:
+
+- **Save & share decks.** Keep several named decks per player rather than one `firecraft.deck.N` slot. Share a deck as a compact code or URL (e.g. `?deck=` with the `{cardId: count}` map encoded), so this works without a server. Import validates the deck with `validateDeck`.
+- **Play between devices** (to replace single-device hot-seat). This needs a server: run `engine.js` on the server as the authority and send each player only their own view, so hands stay hidden and moves can't be cheated via dev tools. Players join a room via an invite link and need to be able to reconnect. Candidate hosts: PartyKit, Cloudflare Durable Objects, Supabase Realtime. GitHub Pages can keep serving the client.
+- Planned: player-vs-Claude battles. The computer opponent (`ai.js`) already exists.
+- Balance: in 300 Virgil-vs-Virgil games the first player won about 55%. Skipping the first player's opening draw is the suggested fix (not yet done).

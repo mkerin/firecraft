@@ -1,6 +1,6 @@
 # Firecraft
 
-A two-player hot-seat card game for the browser. Each player is a firecrafting wizard who summons creatures from Dante's Inferno to burn the other wizard down to 0 health.
+A card game for the browser: play against the computer, or two players on one device. Each player is a firecrafting wizard who summons creatures from Dante's Inferno to burn the other wizard down to 0 health.
 
 **Play:** https://mkerin.github.io/firecraft/
 
