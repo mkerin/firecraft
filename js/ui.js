@@ -21,7 +21,8 @@ const store = {
 
 const SAVE_KEY = 'firecraft.save';
 
-const freshSelection = () => ({ attackers: [], blockers: [], moloch: null });
+// blocks: [{ blocker, attacker }] in the order chosen; picking: a blocker waiting for its attacker to be clicked.
+const freshSelection = () => ({ attackers: [], blocks: [], picking: null, moloch: null });
 
 const app = {
   screen: 'title', // title | build | pass | battle
@@ -36,6 +37,7 @@ const app = {
   drawnUid: null,
   knownUids: new Set(),
   openInfo: new Set(), // uids whose info drawer is pinned open
+  confirming: null, // action awaiting its confirming second click
 };
 
 const root = document.getElementById('app');
@@ -129,7 +131,9 @@ function savedBattleHtml() {
     <div class="eyebrow">Battle in progress · saved ${timeAgo(save.savedAt)}</div>
     <div class="sb-score">${esc(a.name)} <b>${Math.max(0, a.health)}</b> <span>vs</span> <b>${Math.max(0, b.health)}</b> ${esc(b.name)} <span>· turn ${save.game.turn}</span></div>
     <div class="actions"><button class="btn primary big" data-action="resume">Continue battle</button>
-    <button class="btn ghost small" data-action="discard-save">Discard</button></div>
+    ${app.confirming === 'discard-save'
+      ? '<button class="btn small danger" data-action="discard-save">Really discard?</button><button class="btn ghost small" data-action="cancel-confirm">Keep it</button>'
+      : '<button class="btn ghost small" data-action="discard-save">Discard</button>'}</div>
   </div>`;
 }
 
@@ -149,7 +153,7 @@ function renderTitle() {
       <ol>
         <li><b>Draw</b> a card.</li>
         <li><b>Summon</b> one creature by discarding Embers of its type from your hand.</li>
-        <li><b>Attack</b> with any rested creatures. Their ATK is pooled. The defender picks blockers in order; each soaks up to its DEF, and a blocker that soaks its full DEF is destroyed. Whatever is left burns the wizard.</li>
+        <li><b>Attack</b> with any rested creatures. The defender sends each blocker at one attacker (several can gang up on one). A blocker soaks up to its DEF and is destroyed if it soaks its full DEF. Whatever gets past burns the wizard.</li>
       </ol>
       <p>Everyone starts with ${RULES.startingHealth} health and ${RULES.openingHand} cards. Newly summoned creatures can't attack until your next turn unless they have <b>Charge</b>. A creature gets <b>+${RULES.advantageBonus}</b> against a type it beats:</p>
       ${typeWheel()}
@@ -254,6 +258,43 @@ function playerBar(p, side) {
   </div>`;
 }
 
+// The creatures this unit would fight right now: the declared attack or chosen blocks during a block,
+// otherwise everything on the other side of the field.
+function opponentsOf(p, inst) {
+  const g = app.game;
+  const other = g.players[1 - p.index];
+  if (g.phase === 'block') {
+    const blocks = app.sel.blocks;
+    let uids;
+    if (p.index === g.active) uids = blocks.filter((b) => b.attacker === inst.uid).map((b) => b.blocker);
+    else {
+      const mine = blocks.find((b) => b.blocker === inst.uid);
+      uids = mine ? [mine.attacker] : blockableAttackers();
+    }
+    return uids.map((uid) => other.field.find((c) => c.uid === uid)).filter(Boolean);
+  }
+  return other.field;
+}
+
+function blockableAttackers() {
+  const g = app.game;
+  const att = E.activePlayer(g);
+  return g.attack.attackers.filter((uid) => !hasAbility(card(att.field.find((c) => c.uid === uid)), 'ethereal'));
+}
+
+// ▲ this creature beats something it faces (+3 for it), ▼ something it faces beats it (+3 for them).
+function matchupHtml(p, inst, def) {
+  const opp = [...new Set(opponentsOf(p, inst).map((c) => card(c).type))];
+  const bonus = RULES.advantageBonus;
+  const me = TYPE_INFO[def.type].name;
+  const marks = [];
+  const prey = opp.find((t) => BEATS[def.type] === t);
+  const threat = opp.find((t) => BEATS[t] === def.type);
+  if (prey) marks.push(`<span class="mu up" title="${me} ${BEAT_VERB[def.type]} ${TYPE_INFO[prey].name}: +${bonus} when they meet in combat">▲${bonus}</span>`);
+  if (threat) marks.push(`<span class="mu down" title="${TYPE_INFO[threat].name} ${BEAT_VERB[threat]} ${me}: they get +${bonus} when they meet in combat">▼${bonus}</span>`);
+  return marks.length ? `<div class="mus">${marks.join('')}</div>` : '';
+}
+
 function unitHtml(p, inst) {
   const g = app.game;
   const def = card(inst);
@@ -261,17 +302,44 @@ function unitHtml(p, inst) {
   const cls = ['unit', `t-${def.type}`];
   let title = '';
   let badge = '';
+  let hint = '';
   if (g.phase === 'attack' && isActive) {
     const check = E.canAttack(g, inst.uid);
     if (app.sel.attackers.includes(inst.uid)) cls.push('selected', 'attacking');
     else if (check.ok) cls.push('can-act');
     else { cls.push('dim'); title = check.reason; }
   }
-  if (g.phase === 'block' && isActive && g.attack.attackers.includes(inst.uid)) cls.push('attacking');
-  if (g.phase === 'block' && !isActive) {
-    const i = app.sel.blockers.indexOf(inst.uid);
-    if (i >= 0) { cls.push('selected', 'blocking'); badge = `<span class="order">${i + 1}</span>`; }
-    else cls.push('can-act');
+  if (g.phase === 'block') {
+    const blocks = app.sel.blocks;
+    const nameOf = (owner, uid) => esc(card(owner.field.find((c) => c.uid === uid)).name.split(',')[0]);
+    if (isActive && g.attack.attackers.includes(inst.uid)) {
+      cls.push('attacking');
+      const row = E.previewCombat(g, blocks).attackRows.find((r) => r.uid === inst.uid);
+      if (hasAbility(def, 'ethereal')) hint = '<div class="bhint bad" title="Ethereal: cannot be blocked">unblockable</div>';
+      else if (app.sel.picking) {
+        // What sending the chosen blocker at this attacker would do, so a type disadvantage isn't a surprise.
+        cls.push('can-act', 'target');
+        const now = E.previewCombat(g, blocks).damage;
+        const r = E.previewCombat(g, [...blocks, { blocker: app.sel.picking, attacker: inst.uid }]);
+        const lost = r.blockRows.find((b) => b.uid === app.sel.picking).destroyed;
+        const diff = r.damage - now;
+        hint = `<div class="bhint ${diff >= 0 ? 'bad' : ''}" title="Block this: you take ${r.damage} instead of ${now}${lost ? ', and your blocker is destroyed' : ''}">
+          ${diff < 0 ? `saves ${-diff}` : diff > 0 ? `+${diff} dmg!` : 'saves 0'}${lost ? ' · dies' : ''}</div>`;
+      } else {
+        hint = `<div class="bhint ${row.through ? 'bad' : ''}" title="ATK getting past its blockers">${row.through} gets through</div>`;
+      }
+    }
+    if (!isActive) {
+      const i = blocks.findIndex((b) => b.blocker === inst.uid);
+      if (i >= 0) {
+        cls.push('selected', 'blocking');
+        badge = `<span class="order">${i + 1}</span>`;
+        hint = `<div class="bhint neutral">blocks ${nameOf(E.activePlayer(g), blocks[i].attacker)}</div>`;
+      } else if (app.sel.picking === inst.uid) {
+        cls.push('selected', 'picking');
+        hint = '<div class="bhint neutral">pick an attacker ↓</div>';
+      } else cls.push('can-act');
+    }
   }
   if (g.phase === 'summon' && app.sel.moloch && isActive) cls.push('can-act', 'sacrifice');
   if (!app.knownUids.has(inst.uid)) { cls.push('fresh'); app.knownUids.add(inst.uid); }
@@ -282,10 +350,10 @@ function unitHtml(p, inst) {
     ? `<button class="mini-btn" data-action="martyr" data-owner="${p.index}" data-uid="${inst.uid}" title="Destroy it to restore 6 health">Martyr +6</button>`
     : '';
   return `<div class="${cls.join(' ')}" data-action="unit" data-uid="${inst.uid}" data-owner="${p.index}" data-card="${def.id}" title="${esc(title)}">
-    <div class="art">${cardArt(def.id)}</div>
+    <div class="art">${cardArt(def.id)}<span class="utype">${TYPE_INFO[def.type].name}</span>${matchupHtml(p, inst, def)}</div>
     <div class="uname">${esc(def.name.split(',')[0])}</div>
     <div class="ustats"><span class="stat atk">${def.atk}</span><span class="stat def ${inst.defMod < 0 ? 'debuff' : ''}">${def2}</span></div>
-    ${badge}${sick ? '<span class="zz" title="Summoning sickness: attacks next turn">z<sup>z</sup></span>' : ''}${martyrBtn}
+    ${hint}${badge}${sick ? '<span class="zz" title="Summoning sickness: attacks next turn">z<sup>z</sup></span>' : ''}${martyrBtn}
     ${infoButton(inst.uid)}${infoPop(def, inst)}
   </div>`;
 }
@@ -354,20 +422,26 @@ function showPayment(slot) {
   }
 }
 
-function combatHtml(r) {
+function combatHtml(r, baseline = null) {
   const g = app.game;
   const dfn = g.players[r.defender];
   const name = (id) => esc(card(id).name.split(',')[0]);
   const atkRows = r.attackRows.map((a) => `<li class="t-${card(a.cardId).type}">${name(a.cardId)} <b>${a.atk}</b>
       ${a.mods.length ? `<small>${esc(a.mods.join(', '))}</small>` : ''}${a.ethereal ? ' <small class="tag">unblockable</small>' : ''}
+      ${a.blockers?.length ? ` <small>· ${a.through} gets through</small>` : ''}
       ${r.slainAttackers.includes(a.uid) ? ' <small class="tag bad">turned to salt</small>' : ''}</li>`).join('');
-  const blkRows = r.blockRows.map((b, i) => `<li class="t-${card(b.cardId).type}">${i + 1}. ${name(b.cardId)} soaks <b>${b.absorbed}</b>/${b.def}
+  const target = (b) => {
+    const a = r.attackRows.find((x) => x.uid === b.attacker);
+    return a ? ` blocks ${name(a.cardId)},` : '';
+  };
+  const blkRows = r.blockRows.map((b, i) => `<li class="t-${card(b.cardId).type}">${i + 1}. ${name(b.cardId)}${target(b)} soaks <b>${b.absorbed}</b>/${b.def}
       ${b.mods.length ? `<small>${esc(b.mods.join(', '))}</small>` : ''}
       ${b.destroyed ? ' <small class="tag bad">destroyed</small>' : ' <small class="tag good">survives</small>'}</li>`).join('');
   return `<div class="combat">
     <div><h4>Attack</h4><ul>${atkRows}</ul></div>
     <div><h4>Blocks</h4><ul>${blkRows || '<li class="muted">No blockers</li>'}</ul></div>
-    <div class="verdict">${r.totalAttack} ATK${r.petrify ? ` − ${r.petrify} Petrify` : ''} → ${esc(dfn.name)} takes <b class="dmg">${r.damage}</b>
+    <div class="verdict">${r.totalAttack} ATK → ${esc(dfn.name)} takes <b class="dmg">${r.damage}</b>
+      ${baseline !== null && r.blockRows.length ? `<small class="${baseline <= r.damage ? 'tag bad' : ''}">(no block: ${baseline})</small>` : ''}
       ${r.hooks ? '<small class="tag bad">Hooks: discards a card</small>' : ''}</div>
   </div>`;
 }
@@ -391,6 +465,10 @@ function phaseBar() {
     } else if (g.summonedThisTurn) {
       prompt = 'Your creature answers the call.';
       buttons = '<button class="btn primary" data-action="to-attack">To battle ›</button>';
+    } else if (app.confirming === 'redraw') {
+      prompt = `Discard all ${me.hand.length} cards in your hand and draw ${me.hand.length} new ones? You won't summon this turn.`;
+      buttons = `<button class="btn primary danger" data-action="redraw">Yes, redraw</button>
+        <button class="btn ghost" data-action="cancel-confirm">Cancel</button>`;
     } else {
       prompt = 'Summon one creature: click a glowing card in your hand (Embers are paid automatically), or redraw your hand instead.';
       buttons = `<button class="btn ghost" data-action="redraw" title="Discard your whole hand, draw the same number of cards, and skip summoning this turn">Discard &amp; redraw ${me.hand.length}</button>
@@ -403,10 +481,14 @@ function phaseBar() {
     buttons = `<button class="btn primary" data-action="attack" ${app.sel.attackers.length ? '' : 'disabled'}>Attack</button>
       ${forced.length ? '' : '<button class="btn" data-action="skip-attack">Don\'t attack</button>'}`;
   } else if (g.phase === 'block') {
-    prompt = `${esc(foe.name)}, defend! Click your creatures in the order they should block.`;
-    extra = combatHtml(E.previewCombat(g, app.sel.blockers));
-    buttons = `<button class="btn primary" data-action="block">${app.sel.blockers.length ? 'Confirm blocks' : 'Take the hit'}</button>
-      ${app.sel.blockers.length ? '<button class="btn ghost" data-action="clear-blocks">Reset</button>' : ''}`;
+    const picking = app.sel.picking && foe.field.find((c) => c.uid === app.sel.picking);
+    prompt = picking
+      ? `Now click the attacker ${esc(card(picking).name.split(',')[0])} should block.`
+      : `${esc(foe.name)}, defend! Click one of your creatures, then the attacker it should block.`;
+    extra = combatHtml(E.previewCombat(g, app.sel.blocks), E.previewCombat(g, []).damage);
+    const any = app.sel.blocks.length || app.sel.picking;
+    buttons = `<button class="btn primary" data-action="block">${app.sel.blocks.length ? 'Confirm blocks' : 'Take the hit'}</button>
+      ${any ? '<button class="btn ghost" data-action="clear-blocks">Reset</button>' : ''}`;
   } else if (g.phase === 'end') {
     prompt = g.lastCombat ? 'The smoke clears.' : 'No attack this turn.';
     if (g.lastCombat) extra = combatHtml(g.lastCombat);
@@ -584,19 +666,34 @@ const actions = {
         else list.splice(list.indexOf(uid), 1);
       } else if (run(E.canAttack(g, uid))) list.push(uid);
     } else if (g.phase === 'block' && owner !== g.active) {
-      const list = app.sel.blockers;
-      if (list.includes(uid)) list.splice(list.indexOf(uid), 1);
-      else list.push(uid);
+      const sel = app.sel;
+      const i = sel.blocks.findIndex((b) => b.blocker === uid);
+      if (i >= 0) sel.blocks.splice(i, 1);
+      else if (sel.picking === uid) sel.picking = null;
+      else {
+        const targets = blockableAttackers();
+        if (!targets.length) app.toast = 'None of the attackers can be blocked.';
+        else if (targets.length === 1) sel.blocks.push({ blocker: uid, attacker: targets[0] });
+        else sel.picking = uid;
+      }
+    } else if (g.phase === 'block' && owner === g.active) {
+      const sel = app.sel;
+      if (!sel.picking) { app.toast = 'Click one of your creatures first, then the attacker it should block.'; return; }
+      const block = { blocker: sel.picking, attacker: uid };
+      const problem = E.blockProblem(g, [...sel.blocks, block]);
+      if (problem) app.toast = problem;
+      else { sel.blocks.push(block); sel.picking = null; }
     }
   },
   martyr: (d) => {
     const uid = Number(d.uid);
-    app.sel.blockers = app.sel.blockers.filter((b) => b !== uid);
+    app.sel.blocks = app.sel.blocks.filter((b) => b.blocker !== uid);
+    if (app.sel.picking === uid) app.sel.picking = null;
     run(E.martyr(app.game, Number(d.owner), uid));
   },
-  redraw: () => {
-    const n = E.activePlayer(app.game).hand.length;
-    if (!confirm(`Discard all ${n} cards in your hand and draw ${n} new ones? You won't be able to summon this turn.`)) return;
+  // Native confirm() is suppressed in some embedded browsers, so risky buttons ask for a second click instead.
+  redraw: (d, confirmed) => {
+    if (!confirmed) { app.confirming = 'redraw'; return; }
     if (run(E.redrawHand(app.game))) {
       app.sel.attackers = E.forcedAttackers(app.game);
       app.drawnUid = null;
@@ -607,8 +704,8 @@ const actions = {
   },
   attack: () => { if (run(E.declareAttack(app.game, app.sel.attackers))) app.sel = freshSelection(); },
   'skip-attack': () => { run(E.declareAttack(app.game, [])); },
-  'clear-blocks': () => { app.sel.blockers = []; },
-  block: () => { if (run(E.declareBlock(app.game, app.sel.blockers))) app.sel = freshSelection(); },
+  'clear-blocks': () => { app.sel.blocks = []; app.sel.picking = null; },
+  block: () => { if (run(E.declareBlock(app.game, app.sel.blocks))) app.sel = freshSelection(); },
   'end-turn': () => { if (run(E.endTurn(app.game))) showTurnPass(); },
   info: (d) => {
     const uid = Number(d.uid);
@@ -618,7 +715,11 @@ const actions = {
   rematch: () => startGame(1 - app.game.winner),
   'new-decks': () => startBuild(0),
   resume: () => resumeGame(),
-  'discard-save': () => { if (confirm('Discard the saved battle?')) store.remove(SAVE_KEY); },
+  'discard-save': (d, confirmed) => {
+    if (confirmed) store.remove(SAVE_KEY);
+    else app.confirming = 'discard-save';
+  },
+  'cancel-confirm': () => {},
   quit: () => { app.screen = 'title'; },
 };
 
@@ -635,7 +736,10 @@ root.addEventListener('click', (e) => {
   const el = e.target.closest('[data-action]');
   if (!el || el.disabled) return;
   const before = app.game?.players.map((p) => p.health);
-  actions[el.dataset.action]?.(el.dataset);
+  // A confirmation only lasts one click: clicking anything else cancels it.
+  const confirmed = app.confirming === el.dataset.action;
+  app.confirming = null;
+  actions[el.dataset.action]?.(el.dataset, confirmed);
   if (before && app.game) app.flash = app.game.players.map((p, i) => p.health < before[i]);
   if (app.screen === 'battle' || app.screen === 'pass') saveGame();
   render();

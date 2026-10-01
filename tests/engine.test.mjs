@@ -85,52 +85,78 @@ test('summoning sickness applies unless the creature has Charge', () => {
   assert.equal(E.canAttack(s2, s2.players[0].field[0].uid).ok, false);
 });
 
-test('pooled attack: blockers soak in order, overflow hits health', () => {
-  // Minotaur 8 + Nessus 4 = 12 attack vs Gargoyle (5, Petrify -2) then Heretic (3).
-  // Gargoyle is Brimstone, which beats Phlegethon: Gargoyle DEF 5+3 = 8.
+const blk = (blocker, attacker) => ({ blocker: blocker.uid, attacker: attacker.uid });
+
+test('each blocker blocks one attacker; advantage only counts within a pairing', () => {
   const s = setup({ field0: ['minotaur', 'nessus'], field1: ['gargoyle', 'heretic'] });
   E.goToAttack(s);
   assert.ok(E.declareAttack(s, s.players[0].field.map((c) => c.uid)).ok);
-  const [garg, her] = s.players[1].field.map((c) => c.uid);
-  const r = E.previewCombat(s, [garg, her]);
-  // Phlegethon beats Pyre (Heretic): both attackers +3 -> 11 + 7 = 18, minus Petrify 2 = 16.
-  assert.equal(r.totalAttack, 18);
-  assert.equal(r.petrify, 2);
-  assert.deepEqual(r.blockRows.map((b) => [b.def, b.absorbed, b.destroyed]), [[8, 8, true], [3, 3, true]]);
-  assert.equal(r.damage, 5);
-  E.declareBlock(s, [garg, her]);
-  assert.equal(s.players[1].health, RULES.startingHealth - 5);
-  assert.equal(s.players[1].field.length, 0);
+  const [mino, nessus] = s.players[0].field;
+  const [garg, her] = s.players[1].field;
+  const blocks = [blk(garg, mino), blk(her, nessus)];
+  const r = E.previewCombat(s, blocks);
+  // Minotaur 8 - Petrify 2 = 6 (no bonus: it doesn't beat Brimstone) vs Gargoyle 5 + 3 (Brimstone beats Phlegethon).
+  // Nessus 4 + 3 (Phlegethon beats Pyre) = 7 vs Heretic 3 -> 4 through.
+  assert.deepEqual(r.attackRows.map((a) => [a.atk, a.through]), [[6, 0], [7, 4]]);
+  assert.deepEqual(r.blockRows.map((b) => [b.def, b.absorbed, b.destroyed]), [[8, 6, false], [3, 3, true]]);
+  assert.equal(r.damage, 4);
+  assert.ok(E.declareBlock(s, blocks).ok);
+  assert.equal(s.players[1].health, RULES.startingHealth - 4);
+  assert.deepEqual(s.players[1].field.map((c) => c.cardId), ['gargoyle']);
   assert.equal(s.phase, 'end');
+});
+
+test('several blockers can gang up on one attacker and soak in order', () => {
+  const s = setup({ field0: ['minotaur', 'locust'], field1: ['heretic', 'martyr'] });
+  E.goToAttack(s);
+  E.declareAttack(s, s.players[0].field.map((c) => c.uid));
+  const [mino] = s.players[0].field;
+  const [her, mar] = s.players[1].field;
+  const r = E.previewCombat(s, [blk(her, mino), blk(mar, mino)]);
+  // Minotaur 8 + 3 vs Pyre = 11; Heretic soaks 3, Martyr 2 -> 6 through, plus the unblocked Locust's 2.
+  assert.equal(r.damage, 8);
+  assert.ok(r.blockRows.every((b) => b.destroyed));
+});
+
+test('blocks are validated', () => {
+  const s = setup({ field0: ['minotaur'], field1: ['heretic'] });
+  E.goToAttack(s);
+  E.declareAttack(s, []);
+  const [mino] = s.players[0].field;
+  const [her] = s.players[1].field;
+  assert.equal(E.declareBlock(s, [blk(her, mino), blk(her, mino)]).ok, false);
+  assert.equal(E.declareBlock(s, [blk(mino, her)]).ok, false);
+  assert.equal(s.phase, 'block');
 });
 
 test('partial absorption leaves the blocker alive', () => {
   const s = setup({ field0: ['locust'], field1: ['farinata'] });
   E.goToAttack(s);
   E.declareAttack(s, [s.players[0].field[0].uid]);
-  E.declareBlock(s, [s.players[1].field[0].uid]);
+  E.declareBlock(s, [blk(s.players[1].field[0], s.players[0].field[0])]);
   assert.equal(s.players[1].field.length, 1);
   assert.equal(s.players[1].health, RULES.startingHealth);
 });
 
-test('Farinata is Unbowed against a cost-1-only attack', () => {
-  const s = setup({ field0: ['harpy', 'harpy', 'locust'], field1: ['farinata'] });
+test('Farinata is Unbowed while blocking a cost-1 creature', () => {
+  const s = setup({ field0: ['harpy'], field1: ['farinata'] });
+  s.players[1].field[0].defMod = -2;
   E.goToAttack(s);
-  E.declareAttack(s, s.players[0].field.map((c) => c.uid));
-  const r = E.previewCombat(s, [s.players[1].field[0].uid]);
-  // Harpies (Phlegethon) beat Pyre: 6 + 6 + 2 = 14 vs DEF 7 -> 7 through, but Farinata survives.
-  assert.equal(r.damage, 7);
+  E.declareAttack(s, [s.players[0].field[0].uid]);
+  const r = E.previewCombat(s, [blk(s.players[1].field[0], s.players[0].field[0])]);
+  // Harpy 3 + 3 (Phlegethon beats Pyre) = 6 vs Farinata 7 - 2 smoke = 5 -> 1 through, but Farinata survives.
+  assert.equal(r.damage, 1);
   assert.equal(r.blockRows[0].destroyed, false);
 });
 
-test('Pillar of Salt takes the strongest attacker with it', () => {
-  const s = setup({ field0: ['minotaur', 'locust'], field1: ['pillar'] });
+test('Pillar of Salt takes the attacker it blocks with it', () => {
+  const s = setup({ field0: ['moloch', 'locust'], field1: ['pillar'] });
   E.goToAttack(s);
   E.declareAttack(s, s.players[0].field.map((c) => c.uid));
-  E.declareBlock(s, [s.players[1].field[0].uid]);
+  E.declareBlock(s, [blk(s.players[1].field[0], s.players[0].field[0])]);
   assert.deepEqual(s.players[0].field.map((c) => c.cardId), ['locust']);
-  // Minotaur 8 + Locust 2 (+3 Ash beats Brimstone) = 13 vs Pillar 7 (Brimstone beats Phlegethon: +3 = 10) -> 3 through.
-  assert.equal(s.players[1].health, RULES.startingHealth - 3);
+  // Moloch 9 vs Pillar 7 -> 2 through, plus the unblocked Locust's 2.
+  assert.equal(s.players[1].health, RULES.startingHealth - 4);
 });
 
 test('Shade is Ethereal and Cerberus stops cost-1 attackers', () => {
@@ -139,8 +165,8 @@ test('Shade is Ethereal and Cerberus stops cost-1 attackers', () => {
   const [shade, locust] = s.players[0].field.map((c) => c.uid);
   assert.equal(E.canAttack(s, locust).ok, false);
   E.declareAttack(s, [shade]);
-  const r = E.previewCombat(s, [s.players[1].field[0].uid]);
-  assert.equal(r.damage, 5, 'Shade 2 + Advantage 3 over Brimstone goes straight through');
+  assert.equal(E.declareBlock(s, [{ blocker: s.players[1].field[0].uid, attacker: shade }]).ok, false);
+  assert.equal(E.previewCombat(s, []).damage, 2);
 });
 
 test('Minotaur is Relentless and gets Frenzy below half health', () => {
@@ -158,7 +184,7 @@ test('Lucifer: Wind of Cocytus and Frozen Heart', () => {
   E.declareAttack(s, [s.players[0].field[0].uid]);
   assert.equal(E.previewCombat(s, []).damage, 7);
   // Lucifer (Fallen) has no advantage over Moloch (Fallen); 7 attack against 10 DEF: Lucifer survives.
-  E.declareBlock(s, [s.players[1].field[0].uid]);
+  E.declareBlock(s, [blk(s.players[1].field[0], s.players[0].field[0])]);
   assert.equal(s.players[1].field.length, 1);
 });
 
@@ -170,7 +196,7 @@ test('Abaddon smoke destroys creatures reduced to 0 DEF; Heretic returns a Pyre 
   // Destroy the heretic through combat to check Heresy.
   s.phase = 'block';
   s.attack = { attackers: [s.players[0].field[0].uid] };
-  E.declareBlock(s, [s.players[1].field[0].uid]);
+  E.declareBlock(s, [blk(s.players[1].field[0], s.players[0].field[0])]);
   assert.ok(s.players[1].hand.some((c) => c.cardId === 'ember-pyre'));
 });
 
@@ -259,7 +285,8 @@ test('full random games run to completion', () => {
       E.declareAttack(s, p.field.filter((c) => E.canAttack(s, c.uid).ok).map((c) => c.uid));
       if (s.phase === 'block') {
         const d = E.defendingPlayer(s);
-        E.declareBlock(s, d.field.slice(0, 1).map((c) => c.uid));
+        const target = s.attack.attackers.find((uid) => E.blockProblem(s, [{ blocker: d.field[0]?.uid, attacker: uid }]) === null);
+        E.declareBlock(s, d.field.length && target ? [{ blocker: d.field[0].uid, attacker: target }] : []);
       }
       if (s.winner === null) E.endTurn(s);
     }

@@ -3,7 +3,7 @@
 // Turn flow: draw -> summon -> attack -> block (defender) -> end -> next player's draw.
 // Every action validates the phase and returns { ok, reason } instead of throwing on illegal moves.
 
-import { RULES, TYPES, BEATS, card, hasAbility } from './cards.js';
+import { RULES, TYPES, TYPE_INFO, BEATS, BEAT_VERB, card, hasAbility } from './cards.js';
 
 export function shuffle(list, rng = Math.random) {
   const a = [...list];
@@ -353,79 +353,101 @@ export function declareAttack(state, uids) {
 
 // Work out the full result of a block without changing anything. Used for the UI preview and for resolution.
 //
-// Attack is pooled: the attackers' ATK adds up, and the blockers soak it up in the order the defender chose
-// them. A blocker that soaks its whole DEF is destroyed. Whatever is left over hits the defending wizard.
-// A creature whose type beats the type of any creature on the other side gets +3 (ATK for attackers, DEF for blockers).
-export function previewCombat(state, blockerUids) {
+// Blocks are a list of { blocker, attacker } uids, in the order the defender chose them. Each blocker
+// blocks one attacker; several blockers can gang up on the same attacker and soak its ATK in order.
+// A blocker that soaks its whole DEF is destroyed, and whatever an attacker has left hits the defending wizard.
+// Type advantage only counts within a pairing: an attacker gets +3 ATK if it beats the type of any of its
+// blockers, and a blocker gets +3 DEF if it beats the attacker it blocks. Unblocked attackers get no bonus.
+const advantageMod = (type) => `${TYPE_INFO[type].name} ${BEAT_VERB[type]} ${TYPE_INFO[BEATS[type]].name} +${RULES.advantageBonus}`;
+
+// Why a block is not allowed, or null if it is.
+export function blockProblem(state, blocks) {
+  const att = activePlayer(state);
+  const dfn = defendingPlayer(state);
+  const seen = new Set();
+  for (const { blocker, attacker } of blocks) {
+    if (seen.has(blocker)) return 'Each creature can only block once.';
+    seen.add(blocker);
+    if (!dfn.field.some((c) => c.uid === blocker)) return 'Blockers must be your own creatures.';
+    const a = att.field.find((c) => c.uid === attacker);
+    if (!a || !state.attack.attackers.includes(attacker)) return 'You can only block an attacking creature.';
+    if (hasAbility(card(a), 'ethereal')) return `${card(a).name} is Ethereal and cannot be blocked.`;
+  }
+  return null;
+}
+
+export function previewCombat(state, blocks) {
   const att = activePlayer(state);
   const dfn = defendingPlayer(state);
   const attackers = state.attack.attackers.map((uid) => att.field.find((c) => c.uid === uid)).filter(Boolean);
-  const blockers = blockerUids.map((uid) => dfn.field.find((c) => c.uid === uid)).filter(Boolean);
-  const blockerTypes = blockers.map((b) => card(b).type);
-  const attackerTypes = attackers.map((a) => card(a).type);
+  const pairs = blocks
+    .map(({ blocker, attacker }) => ({ b: dfn.field.find((c) => c.uid === blocker), a: attackers.find((c) => c.uid === attacker) }))
+    .filter(({ a, b }) => a && b && !hasAbility(card(a), 'ethereal'));
   const cocytus = dfn.field.filter((c) => hasAbility(card(c), 'cocytus')).length;
 
   const attackRows = attackers.map((a) => {
     const def = card(a);
+    const mine = pairs.filter((p) => p.a === a).map((p) => p.b);
     let atk = def.atk;
     const mods = [];
     if (hasAbility(def, 'frenzy') && att.health < RULES.startingHealth / 2) { atk += 3; mods.push('Frenzy +3'); }
     if (cocytus) { atk -= 2 * cocytus; mods.push(`Cocytus -${2 * cocytus}`); }
-    const victim = blockerTypes.find((t) => BEATS[def.type] === t);
-    if (victim) { atk += RULES.advantageBonus; mods.push(`Advantage +${RULES.advantageBonus}`); }
-    return { uid: a.uid, cardId: a.cardId, atk: Math.max(0, atk), mods, ethereal: hasAbility(def, 'ethereal') };
+    if (mine.some((b) => BEATS[def.type] === card(b).type)) { atk += RULES.advantageBonus; mods.push(advantageMod(def.type)); }
+    const petrify = 2 * mine.filter((b) => hasAbility(card(b), 'petrify')).length;
+    if (petrify) { atk -= petrify; mods.push(`Petrify -${petrify}`); }
+    return { uid: a.uid, cardId: a.cardId, atk: Math.max(0, atk), mods, ethereal: hasAbility(def, 'ethereal'), blockers: mine.map((b) => b.uid), through: 0 };
   });
 
-  const rawBlockable = attackRows.filter((r) => !r.ethereal).reduce((s, r) => s + r.atk, 0);
-  const direct = attackRows.filter((r) => r.ethereal).reduce((s, r) => s + r.atk, 0);
-  const petrify = 2 * blockers.filter((b) => hasAbility(card(b), 'petrify')).length;
-  const blockable = Math.max(0, rawBlockable - petrify);
-  const onlyCostOne = attackers.every((a) => card(a).cost === 1);
-
-  let remaining = blockable;
-  const blockRows = blockers.map((b) => {
-    const def = card(b);
-    let defense = currentDef(b);
-    const mods = [];
-    if (b.defMod) mods.push(`Smoke ${b.defMod}`);
-    if (attackerTypes.some((t) => BEATS[def.type] === t)) { defense += RULES.advantageBonus; mods.push(`Advantage +${RULES.advantageBonus}`); }
-    const absorbed = Math.min(remaining, defense);
-    remaining -= absorbed;
-    let destroyed = defense > 0 && absorbed >= defense;
-    if (destroyed && hasAbility(def, 'unbowed') && onlyCostOne) { destroyed = false; mods.push('Unbowed'); }
-    return { uid: b.uid, cardId: b.cardId, def: defense, absorbed, destroyed, mods };
-  });
-
-  const damageTaken = remaining + direct;
-  const saltCount = blockRows.filter((r) => r.destroyed && hasAbility(card(r.cardId), 'salt')).length;
-  const slainAttackers = [...attackRows].sort((x, y) => y.atk - x.atk).slice(0, saltCount).map((r) => r.uid);
-  const hooks = damageTaken > 0 && attackers.some((a) => hasAbility(card(a), 'hooks'));
+  const blockRows = [];
+  const slainAttackers = [];
+  let hooks = false;
+  for (const row of attackRows) {
+    const aDef = card(row.cardId);
+    let remaining = row.atk;
+    for (const { a, b } of pairs) {
+      if (a.uid !== row.uid) continue;
+      const def = card(b);
+      let defense = currentDef(b);
+      const mods = [];
+      if (b.defMod) mods.push(`Smoke ${b.defMod}`);
+      if (BEATS[def.type] === aDef.type) { defense += RULES.advantageBonus; mods.push(advantageMod(def.type)); }
+      const absorbed = Math.min(remaining, defense);
+      remaining -= absorbed;
+      let destroyed = defense > 0 && absorbed >= defense;
+      if (destroyed && hasAbility(def, 'unbowed') && aDef.cost === 1) { destroyed = false; mods.push('Unbowed'); }
+      if (destroyed && hasAbility(def, 'salt') && !slainAttackers.includes(row.uid)) slainAttackers.push(row.uid);
+      blockRows.push({ uid: b.uid, cardId: b.cardId, attacker: row.uid, def: defense, absorbed, destroyed, mods });
+    }
+    row.through = remaining;
+    if (remaining > 0 && hasAbility(aDef, 'hooks')) hooks = true;
+  }
+  // Report blockers in the order the defender chose them.
+  blockRows.sort((x, y) => pairs.findIndex((p) => p.b.uid === x.uid) - pairs.findIndex((p) => p.b.uid === y.uid));
 
   return {
     attacker: att.index,
     defender: dfn.index,
     attackRows,
     blockRows,
-    totalAttack: rawBlockable + direct,
-    petrify: Math.min(petrify, rawBlockable),
-    direct,
-    damage: damageTaken,
+    totalAttack: attackRows.reduce((s, r) => s + r.atk, 0),
+    damage: attackRows.reduce((s, r) => s + r.through, 0),
     slainAttackers,
     hooks,
   };
 }
 
-export function declareBlock(state, blockerUids) {
+export function declareBlock(state, blocks) {
   if (state.phase !== 'block') return fail('Not the block phase.');
-  const dfn = defendingPlayer(state);
-  if (new Set(blockerUids).size !== blockerUids.length) return fail('Each creature can only block once.');
-  if (!blockerUids.every((uid) => dfn.field.some((c) => c.uid === uid))) return fail('Blockers must be your own creatures.');
+  const problem = blockProblem(state, blocks);
+  if (problem) return fail(problem);
 
-  const result = previewCombat(state, blockerUids);
+  const result = previewCombat(state, blocks);
   const att = activePlayer(state);
-  if (blockerUids.length) {
-    const names = blockerUids.map((uid) => card(dfn.field.find((c) => c.uid === uid)).name);
-    log(state, `${dfn.name} blocks with ${names.join(', ')}.`, 'block');
+  const dfn = defendingPlayer(state);
+  if (blocks.length) {
+    const nameOf = (p, uid) => card(p.field.find((c) => c.uid === uid)).name.split(',')[0];
+    const pairs = blocks.map(({ blocker, attacker }) => `${nameOf(dfn, blocker)} blocks ${nameOf(att, attacker)}`);
+    log(state, `${dfn.name}: ${pairs.join('; ')}.`, 'block');
   } else {
     log(state, `${dfn.name} does not block.`, 'block');
   }

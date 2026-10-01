@@ -37,9 +37,9 @@ export const BEAT_VERB = {
 
 export const ABILITIES = {
   charge: { name: 'Charge', text: 'Can attack the turn it is summoned.' },
-  petrify: { name: 'Petrify', text: 'When it blocks, the total incoming attack is reduced by 2.' },
+  petrify: { name: 'Petrify', text: 'The attacker it blocks gets -2 ATK.' },
   'cannot-attack': { name: 'Immovable', text: 'Cannot attack.' },
-  salt: { name: 'Looking Back', text: 'When destroyed while blocking, the strongest attacker is also destroyed.' },
+  salt: { name: 'Looking Back', text: 'When destroyed while blocking, the attacker it blocks is also destroyed.' },
   gatekeeper: { name: 'Gatekeeper', text: "While on the field, the enemy's cost-1 creatures cannot attack." },
   swarm: { name: 'Swarm', text: 'When summoned, summon another Harpy from your hand for free.' },
   arrow: { name: 'Arrow', text: 'When summoned, deals 2 damage to the enemy wizard.' },
@@ -48,8 +48,8 @@ export const ABILITIES = {
   heresy: { name: 'Heresy', text: 'When destroyed, return a Pyre Ember from your discard pile to your hand.' },
   martyrdom: { name: 'Martyrdom', text: 'At any time, destroy it to restore 6 health.' },
   rebirth: { name: 'Rebirth', text: 'When destroyed, shuffle it back into your deck.' },
-  unbowed: { name: 'Unbowed', text: 'Cannot be destroyed by an attack made only of cost-1 creatures.' },
-  hooks: { name: 'Hooks', text: 'If its attack is not fully blocked, the enemy discards a random card.' },
+  unbowed: { name: 'Unbowed', text: 'Cannot be destroyed while blocking a cost-1 creature.' },
+  hooks: { name: 'Hooks', text: 'If any of its ATK gets past its blockers, the enemy discards a random card.' },
   'burnt-offering': { name: 'Burnt Offering', text: 'To summon it, you must also sacrifice one of your creatures.' },
   legendary: { name: 'Legendary', text: 'Only one copy per deck.' },
   cocytus: { name: 'Wind of Cocytus', text: 'Enemy creatures get -2 ATK.' },

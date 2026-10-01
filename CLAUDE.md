@@ -11,7 +11,7 @@ Two-player hot-seat card game in the browser. Each player is a "firecrafting wiz
 ## Layout
 
 - `js/cards.js`: card pool, `RULES` constants, type wheel (`BEATS`), ability text (`ABILITIES`), deck helpers (`validateDeck`, `fillWithEmbers`, `randomDeck`). No DOM access.
-- `js/engine.js`: all game rules. Pure and DOM-free so the UI, tests and a future AI player share it. Actions mutate the state and return `{ ok, reason }` instead of throwing. `previewCombat` computes a block without mutating; `declareBlock` applies it.
+- `js/engine.js`: all game rules. Pure and DOM-free so the UI, tests and a future AI player share it. Actions mutate the state and return `{ ok, reason }` instead of throwing. Blocks are `[{ blocker, attacker }]` uids in the defender's order. `previewCombat(state, blocks)` computes the result without mutating; `declareBlock` validates it (`blockProblem`) and applies it.
 - `js/art.js`: a hand-built SVG scene (200×140) per card. Shared gradients/filters are in `ART_DEFS`, injected into the page once.
 - `js/ui.js`: screens (title → deck builder P1 → pass → builder P2 → pass → battle). Re-renders `#app` via `innerHTML`, with event delegation on `data-action`.
 - `css/style.css`: all styling. Type colors come from `.t-<type>` setting `--tc`.
@@ -22,8 +22,9 @@ Two-player hot-seat card game in the browser. Each player is a "firecrafting wiz
 - **Summon**: one creature per turn, paid by discarding Embers of its type from hand; Hellfire Embers are wild. Payment is automatic (exact type first, then wild). Lucifer costs one Ember of each type. Moloch also needs a sacrifice.
 - **Redraw**: instead of summoning, discard the whole hand and draw the same number; the turn goes straight to Attack.
 - **Summoning sickness**: creatures can't attack the turn they're summoned unless they have Charge (Harpy, Shade).
-- **Combat is pooled**: attackers' ATK is summed. The defender orders blockers; each soaks up to its DEF and is destroyed if it soaks its full DEF. The remainder hits the wizard. Attackers take no damage except via abilities (Pillar of Salt). Damage on surviving blockers resets each turn.
-- **Type wheel**: Brimstone → Phlegethon → Pyre → Fallen → Ash → Brimstone. A creature gets +3 (ATK attacking, DEF blocking) if its type beats any creature on the other side of that combat.
+- **Combat is per attacker**: the defender sends each blocker at one attacker, and several blockers can gang up on one attacker, soaking in order. A blocker soaks up to its DEF and is destroyed if it soaks its full DEF. Whatever an attacker has left over hits the wizard, as does the full ATK of unblocked attackers. Attackers take no damage except via abilities (Pillar of Salt). Damage on surviving blockers resets each turn. (This replaced an earlier pooled model at the user's request.)
+- **Type wheel**: Brimstone → Phlegethon → Pyre → Fallen → Ash → Brimstone. The +3 only counts within a pairing: an attacker gets +3 ATK if it beats any of *its* blockers, and a blocker gets +3 DEF if it beats the attacker it blocks. Unblocked attackers get no bonus.
+- Per-pairing ability wording: Petrify gives −2 to the attacker it blocks; Pillar of Salt destroys the attacker it blocked; Unbowed protects while blocking a cost-1 creature; Hooks triggers if Malacoda's own ATK gets past its blockers; Ethereal attackers can't be assigned blockers.
 - **Deck limits**: creatures are unlimited copies. Only Lucifer (Legendary, 1) and Hellfire Ember (2) are capped.
 - Card tweaks made for the pooled-combat model: Shade is Ethereal (its ATK always hits the wizard); Locust discards a *random* enemy Ember. Scaled for 40 HP: Minotaur's Frenzy triggers below half health; Lucifer's Frozen Heart costs 10.
 - Cost is roughly (ATK+DEF)/4, adjusted for abilities.
@@ -36,6 +37,8 @@ Two-player hot-seat card game in the browser. Each player is a "firecrafting wiz
 - The hand shows creatures as full cards; Embers are grouped as compact stacks on the right. Hovering a summonable creature highlights the Embers it would spend. Ember cards have a flatter frame than creatures.
 - The ▾ info arrow on hand cards and field creatures: hover to peek, click to pin (stats, cost, matchups, abilities).
 - Hovering any card shows it full size in the sidebar inspector.
+- **Don't use `confirm()`/`alert()`.** The Browser pane cancels them instantly (`confirm` returns false). Risky buttons use a second click instead: set `app.confirming = '<action>'` and render a "Yes / Cancel" pair; the action runs when it receives `confirmed`.
+- Type advantage is visible on the field. Each creature shows a type chip, plus ▲3/▼3 badges against what it currently faces. During a block, that is the declared attackers or the chosen blockers; otherwise it is the enemy field. Block UI: click your creature (it pulses, "pick an attacker"), then the attacker. With only one blockable attacker the block is assigned at once. While picking, each attacker shows what that block would do ("saves N · dies" or "+N dmg!"); otherwise attackers show "N gets through". Click an assigned blocker to unassign it. The combat preview shows "(no block: N)", because a weak-typed blocker switches on the attackers' +3.
 
 ## Working with the user
 
