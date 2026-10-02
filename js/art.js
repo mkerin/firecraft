@@ -418,6 +418,78 @@ const ART = {
     <g fill="#0a0908">${[[40, 40], [160, 36], [56, 90], [150, 96], [28, 70], [172, 66]].map(([x, y]) => `<path d="M${x},${y} l4,-2 l2,2 l-2,2 Z"/>`).join('')}</g>
     ${sparks(52, 14, '#ff9a5a')}`),
 
+  plutus: () => frame('brimstone', `
+    <circle cx="100" cy="74" r="56" fill="url(#hot-core)" opacity=".3"/>
+    <path d="M30,140 C44,112 70,104 100,102 C130,104 156,112 170,140 Z" fill="#3a2a08"/>
+    <g fill="url(#gold)" stroke="#5a4206" stroke-width=".6">
+      ${[[44, 128], [60, 120], [78, 114], [122, 114], [140, 120], [156, 128], [70, 130], [130, 130], [100, 124], [88, 134], [112, 134]]
+        .map(([x, y]) => `<ellipse cx="${x}" cy="${y}" rx="7" ry="2.6"/>`).join('')}
+    </g>
+    <path d="M76,108 C72,90 76,70 90,58 L84,40 L96,52 L104,52 L116,40 L110,58 C124,70 128,90 124,108 Z" fill="#1e1608"/>
+    <path d="M100,62 C108,62 116,74 112,86 L106,94 L100,98 L94,94 L88,86 C84,74 92,62 100,62 Z" fill="#2c210c"/>
+    <path d="M94,92 L100,104 L106,92" fill="#2c210c"/>
+    <path d="M95,96 l2,4 l2,-4 M101,96 l2,4 l2,-4" fill="#e8e0c8"/>
+    <g fill="#ffd84a" filter="url(#glow)"><path d="M90,74 l7,2 l-6,2 Z"/><path d="M110,74 l-7,2 l6,2 Z"/></g>
+    <path d="M124,104 C140,100 150,88 146,74" stroke="#1e1608" stroke-width="6" fill="none" stroke-linecap="round"/>
+    ${sparks(71, 26, '#ffe04a')}`),
+
+  usurer: () => frame('phlegethon', `
+    ${[[20, 10], [48, 30], [80, 6], [128, 22], [160, 8], [182, 40], [36, 58], [150, 60], [110, 44]]
+      .map(([x, y], i) => flame(x, y, 0.45, 'flame', 180 + (i % 3 - 1) * 12, 0.85)).join('')}
+    <path d="M0,112 C40,106 80,114 120,108 C150,104 180,110 200,108 L200,140 L0,140 Z" fill="#c26a2a"/>
+    <path d="M0,118 C50,114 90,122 130,116 C160,112 186,118 200,116 L200,140 L0,140 Z" fill="#7a3410"/>
+    <ellipse cx="100" cy="116" rx="40" ry="5" fill="url(#hot-core)" opacity=".7"/>
+    <path d="M70,116 C70,92 82,76 98,74 C114,76 128,90 130,116 Z" fill="#2a0810"/>
+    <circle cx="96" cy="68" r="9" fill="#2a0810"/>
+    <path d="M90,72 C84,84 80,94 84,104" stroke="#2a0810" stroke-width="4" fill="none" stroke-linecap="round"/>
+    <path d="M90,78 C94,86 100,88 104,86" stroke="#c9a040" stroke-width="1" fill="none"/>
+    <path d="M100,86 C92,88 92,104 102,104 C112,104 112,88 104,86 Z" fill="url(#gold)" stroke="#6a4a0a" stroke-width=".8"/>
+    <path d="M100,94 l4,0" stroke="#6a4a0a" stroke-width="1.2"/>
+    <g fill="#ffd84a" filter="url(#glow)"><circle cx="94" cy="70" r="1.1"/><circle cx="99" cy="70" r="1.1"/></g>
+    ${sparks(72, 24, '#ffb06a')}`),
+
+  simon: () => frame('pyre', `
+    <path d="M0,104 L200,104 L200,140 L0,140 Z" fill="url(#stone)"/>
+    ${[30, 170].map((x) => `<ellipse cx="${x}" cy="108" rx="14" ry="4" fill="#120502"/>${flame(x - 4, 106, 0.6)}${flame(x + 4, 106, 0.55)}`).join('')}
+    <ellipse cx="100" cy="108" rx="18" ry="5" fill="#120502"/>
+    <path d="M90,108 C90,92 92,80 94,66 L100,66 L101,90 L102,66 L108,66 C110,80 110,92 110,108 Z" fill="#1c0a04"/>
+    <path d="M88,108 C92,104 108,104 112,108" stroke="#3a1c0a" stroke-width="3" fill="none"/>
+    <path d="M94,66 L88,62 L96,60 Z M108,66 L114,62 L106,60 Z" fill="#1c0a04"/>
+    <g filter="url(#glow)">${flame(91, 62, 0.9, 'flame', -10)}${flame(111, 62, 0.9, 'flame', 10)}${flame(91, 60, 0.55, 'flame-yellow', -10)}${flame(111, 60, 0.55, 'flame-yellow', 10)}</g>
+    <g fill="url(#gold)" stroke="#6a4a0a" stroke-width=".5">
+      <ellipse cx="62" cy="114" rx="5" ry="2"/><ellipse cx="140" cy="116" rx="5" ry="2"/><ellipse cx="124" cy="126" rx="5" ry="2"/>
+    </g>
+    ${sparks(73, 30, '#ffd27a')}`),
+
+  mammon: () => frame('fallen', `
+    <circle cx="100" cy="66" r="50" fill="url(#hot-core)" opacity=".25"/>
+    ${batWings(100, 66, 1.0, '#1a0a24', '#9a7a3a')}
+    <path d="M78,124 C76,96 84,78 100,74 C116,78 124,96 122,124 Z" fill="#26103a"/>
+    <path d="M86,84 L100,96 L114,84" stroke="url(#gold)" stroke-width="2" fill="none"/>
+    ${hornedHead(100, 62, 9, '#26103a', '#ffd84a')}
+    <path d="M89,52 L91,44 L95,50 L100,42 L105,50 L109,44 L111,52 Z" fill="url(#gold)"/>
+    <path d="M82,96 C72,100 68,108 72,116 M118,96 C128,100 132,108 128,116" stroke="#26103a" stroke-width="5" fill="none" stroke-linecap="round"/>
+    <g fill="url(#gold)" stroke="#6a4a0a" stroke-width=".6">
+      ${[[60, 132], [74, 128], [88, 134], [100, 128], [112, 134], [126, 128], [140, 132], [70, 120], [130, 120], [100, 136]]
+        .map(([x, y]) => `<ellipse cx="${x}" cy="${y}" rx="8" ry="3"/>`).join('')}
+    </g>
+    <g fill="url(#gold)" filter="url(#glow)"><circle cx="72" cy="116" r="3"/><circle cx="128" cy="116" r="3"/></g>
+    ${sparks(74, 28, '#ffe08a')}`),
+
+  soothsayer: () => frame('ash', `
+    <g filter="url(#blur6)" fill="#3a3632" opacity=".8"><ellipse cx="60" cy="30" rx="60" ry="16"/><ellipse cx="150" cy="50" rx="50" ry="14"/></g>
+    <path d="M0,118 C60,112 140,122 200,116 L200,140 L0,140 Z" fill="#0e0d0c"/>
+    <line x1="132" y1="38" x2="124" y2="124" stroke="#4a3a2a" stroke-width="2.5"/>
+    <circle cx="133" cy="34" r="5" fill="#d8f0ff" opacity=".6" filter="url(#glow)"/>
+    <path d="M78,124 C80,100 86,78 100,70 C114,78 120,100 122,124 Z" fill="#1c1a16"/>
+    <path d="M114,84 C122,86 126,90 128,96" stroke="#1c1a16" stroke-width="5" fill="none" stroke-linecap="round"/>
+    <circle cx="100" cy="60" r="9" fill="#1c1a16"/>
+    <path d="M92,56 C96,52 104,52 108,56 L108,62 C104,60 96,60 92,62 Z" fill="#2c2924"/>
+    <path d="M100,68 C104,72 106,80 104,88" stroke="#bfe6ff" stroke-width=".8" fill="none" opacity=".6"/>
+    <g fill="#bfe6ff" opacity=".7"><circle cx="104" cy="90" r="1"/><circle cx="103" cy="96" r=".8"/></g>
+    <path d="M72,40 l-10,-4 M66,48 l-12,0 M70,56 l-10,4" stroke="#e8e4dc" stroke-width="1" opacity=".5"/>
+    ${sparks(75, 18, '#d8d2c8')}`),
+
   // ---------- embers ----------
 
   'ember-brimstone': () => frame('brimstone', `

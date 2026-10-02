@@ -6,7 +6,7 @@ Two-player hot-seat card game in the browser. Each player is a "firecrafting wiz
 
 - Public repo: https://github.com/mkerin/firecraft. GitHub Pages serves `main` (root) at https://mkerin.github.io/firecraft/, and every push to `main` redeploys within a minute or two. `.nojekyll` makes Pages serve the files as-is.
 - Use relative asset paths only (the site lives under `/firecraft/`, not `/`).
-- **Online play** runs on Cloudflare (Workers free plan): one Worker serves the game files *and* the server, so the page and API share an origin (no CORS). `wrangler.toml` serves the repo root as static assets; `.assetsignore` keeps everything except the game files private. Deploy with `npx wrangler deploy` (the user must have run `npx wrangler login`). Until the user moves everyone over, GitHub Pages still serves the client; "Play online" there just reports that online play isn't available.
+- **Online play** is live at https://firecraft.emberworks.workers.dev (Cloudflare Workers free plan; workers.dev subdomain `emberworks`). One Worker serves the game files *and* the server, so the page and API share an origin (no CORS). `wrangler.toml` serves the repo root as static assets; `.assetsignore` keeps everything except the game files private. Deploy with `npx wrangler deploy` (the user must have run `npx wrangler login`). Until the user moves everyone over, GitHub Pages still serves the client; "Play online" there just reports that online play isn't available.
 - Players' saves and decks are in their own browser's localStorage. Changing the save shape can break "Continue" for live players, so keep old saves loadable or discard them gracefully.
 
 ## Run & test
@@ -41,6 +41,7 @@ Two-player hot-seat card game in the browser. Each player is a "firecrafting wiz
 - **Deck limits**: creatures are unlimited copies. Only Lucifer (Legendary, 1) and Hellfire Ember (2) are capped.
 - Card tweaks made for the pooled-combat model: Shade is Ethereal (its ATK always hits the wizard); Locust discards a *random* enemy Ember. Scaled for 40 HP: Minotaur's Frenzy triggers below half health; Lucifer's Frozen Heart costs 10.
 - Cost is roughly (ATK+DEF)/4, adjusted for abilities.
+- **Economy cards** (one per type, low stats, card/Ember advantage instead): Plutus (Hoard: blocks and survives → random Ember from discard to hand), Usurer (Usury: ATK gets through → draw), Simon Magus (Simony: redraw draws 2 extra), Mammon (Avarice: your creatures cost 1 less, min 1, no stacking, not Lucifer; applied in `paymentFor`), Soothsayer (Foresight: extra draw at turn start). Bonus draws from an empty deck just fail; they never cause burnout.
 
 ## UI behaviour worth preserving
 

@@ -10,7 +10,7 @@ export const RULES = {
 
 // Online play: bump this when the client/server messages or the rules change in a way that matters,
 // so players with an old page open are asked to refresh.
-export const PROTOCOL = 1;
+export const PROTOCOL = 2;
 
 export const TYPES = ['brimstone', 'phlegethon', 'pyre', 'fallen', 'ash'];
 
@@ -61,6 +61,11 @@ export const ABILITIES = {
   plague: { name: 'Plague', text: 'When summoned, the enemy discards a random Ember.' },
   ethereal: { name: 'Ethereal', text: 'Its ATK cannot be blocked; it always hits the enemy wizard.' },
   smoke: { name: 'Smoke of the Pit', text: 'When summoned, all enemy creatures permanently get -1 DEF.' },
+  hoard: { name: 'Hoard', text: 'Whenever it blocks and survives, return a random Ember from your discard pile to your hand.' },
+  usury: { name: 'Usury', text: 'If any of its ATK gets past its blockers, draw a card.' },
+  simony: { name: 'Simony', text: 'When you redraw your hand, draw 2 extra cards.' },
+  avarice: { name: 'Avarice', text: 'Your creatures cost 1 less Ember (never below 1). Does not stack, and not for Lucifer.' },
+  foresight: { name: 'Foresight', text: 'At the start of your turn, draw an extra card.' },
 };
 
 const creature = (id, type, name, cost, atk, def, abilities, flavor, extra = {}) => ({
@@ -78,6 +83,8 @@ export const CARDS = [
     'She was told not to look back.'),
   creature('cerberus', 'brimstone', 'Cerberus', 4, 6, 6, ['gatekeeper'],
     'Three throats, one hunger.'),
+  creature('plutus', 'brimstone', 'Plutus, Wolf of Wealth', 2, 1, 6, ['hoard'],
+    'He guards the circle where the misers and the spendthrifts roll their weights forever.'),
   // Phlegethon
   creature('harpy', 'phlegethon', 'Harpy of the Suicide Wood', 1, 3, 1, ['charge', 'swarm'],
     'They nest in trees that bleed when you break them.'),
@@ -85,6 +92,8 @@ export const CARDS = [
     'He patrols the boiling river and shoots anyone who rises too far out of it.'),
   creature('minotaur', 'phlegethon', 'The Minotaur', 3, 8, 3, ['relentless', 'frenzy'],
     'Rage with horns.'),
+  creature('usurer', 'phlegethon', 'Usurer of the Burning Sand', 1, 2, 2, ['usury'],
+    'A purse hangs from each neck, and still their eyes feed on it.'),
   // Pyre
   creature('heretic', 'pyre', 'Heretic in the Burning Tomb', 1, 1, 3, ['heresy'],
     'The lid will close on Judgement Day. Until then, it burns.'),
@@ -94,11 +103,15 @@ export const CARDS = [
     'Every pyre is a nest.'),
   creature('farinata', 'pyre', 'Farinata, the Unbowed', 3, 4, 7, ['unbowed'],
     'He rises from his tomb as if he held Hell in great contempt.'),
+  creature('simon', 'pyre', 'Simon Magus', 2, 1, 4, ['simony'],
+    'He tried to buy the fire of Heaven. Now it is sold to his feet, by the hour.'),
   // Fallen
   creature('malacoda', 'fallen', 'Malacoda of the Malebranche', 2, 4, 3, ['hooks'],
     'He and his Evil-Claws drag sinners under the boiling pitch.'),
   creature('moloch', 'fallen', 'Moloch, Devourer', 3, 9, 6, ['burnt-offering'],
     'The furnace in its belly is never empty for long.'),
+  creature('mammon', 'fallen', 'Mammon, Treasurer of Hell', 3, 3, 6, ['avarice'],
+    'Even when he fell, his eyes were on the golden pavement of Heaven.'),
   creature('lucifer', 'fallen', 'Lucifer, the Frozen King', 5, 10, 10, ['legendary', 'cannot-attack', 'cocytus', 'frozen-heart'],
     'At the very bottom of Hell there is no fire, only ice and the beating of wings.',
     { costEach: true, maxCopies: 1 }),
@@ -107,6 +120,8 @@ export const CARDS = [
     'Crowned with gold, with the faces of men and the teeth of lions.'),
   creature('shade', 'ash', 'Shade of the Second Circle', 2, 2, 2, ['charge', 'ethereal'],
     'Carried on a wind that never stops, they cannot be held.'),
+  creature('soothsayer', 'ash', 'Soothsayer of the Eighth Circle', 2, 0, 3, ['cannot-attack', 'foresight'],
+    'His head was wrenched backward for looking too far ahead. He still tries.'),
   creature('abaddon', 'ash', 'Abaddon, Angel of the Abyss', 4, 7, 5, ['smoke'],
     'He holds the key to the bottomless pit, and the smoke rises with him.'),
   // Embers

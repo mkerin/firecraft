@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { RULES, validateDeck, randomDeck, fillWithEmbers, deckSize, deckToList } from '../js/cards.js';
+import { RULES, card, validateDeck, randomDeck, fillWithEmbers, deckSize, deckToList } from '../js/cards.js';
 import * as E from '../js/engine.js';
 
 // Deterministic RNG so shuffles and random discards are repeatable.
@@ -327,4 +327,61 @@ test('conceding ends the game for the other player', () => {
   assert.equal(s.winner, 1);
   assert.equal(s.phase, 'gameover');
   assert.equal(E.concede(s, 1).ok, false);
+});
+
+test('Plutus returns an Ember from the discard pile when it blocks and survives', () => {
+  const s = setup({ field0: ['harpy', 'minotaur'], field1: ['plutus', 'plutus'] });
+  s.players[1].discard = [inst('ember-fallen')];
+  const [h, m] = s.players[0].field.map((c) => c.uid);
+  const [p1, p2] = s.players[1].field.map((c) => c.uid);
+  E.goToAttack(s);
+  E.declareAttack(s, [h, m]);
+  // Plutus survives the Harpy (3 vs DEF 6) but not the Minotaur (8).
+  assert.ok(E.declareBlock(s, [{ blocker: p1, attacker: h }, { blocker: p2, attacker: m }]).ok);
+  assert.deepEqual(s.players[1].hand.map((c) => c.cardId), ['ember-fallen']);
+  assert.equal(s.players[1].discard.some((c) => c.cardId === 'ember-fallen'), false);
+});
+
+test('Usurer draws a card when its ATK gets through, not when fully blocked', () => {
+  const s = setup({ field0: ['usurer'], field1: ['gargoyle'] });
+  const p = s.players[0];
+  const before = p.hand.length;
+  E.goToAttack(s);
+  E.declareAttack(s, [p.field[0].uid]);
+  E.declareBlock(s, [{ blocker: s.players[1].field[0].uid, attacker: p.field[0].uid }]);
+  assert.equal(p.hand.length, before);
+  E.endTurn(s); E.goToAttack(s); E.declareAttack(s, []); E.endTurn(s);
+  const drawnHand = p.hand.length;
+  E.goToAttack(s);
+  E.declareAttack(s, [p.field[0].uid]);
+  E.declareBlock(s, []);
+  assert.equal(p.hand.length, drawnHand + 1);
+});
+
+test('Simon Magus adds 2 cards to each redraw', () => {
+  const s = setup({ hand0: ['ember-ash', 'ember-ash', 'ember-ash'], field0: ['simon'] });
+  assert.ok(E.redrawHand(s).ok);
+  assert.equal(s.players[0].hand.length, 5);
+});
+
+test('Mammon makes creatures cost 1 less, never below 1, and does not stack', () => {
+  const s = setup({ hand0: ['cerberus', 'harpy', 'lucifer', 'ember-brimstone', 'ember-brimstone', 'ember-brimstone', 'ember-phlegethon'], field0: ['mammon', 'mammon'] });
+  const p = s.players[0];
+  assert.equal(E.paymentFor(p, card('cerberus')).length, 3);
+  assert.equal(E.paymentFor(p, card('harpy')).length, 1);
+  assert.equal(E.paymentFor(p, card('lucifer')), null, 'Lucifer still needs every type');
+  assert.ok(E.summon(s, uidsOf(p.hand, 'cerberus')[0]).ok);
+  assert.deepEqual(p.hand.map((c) => c.cardId).sort(), ['ember-phlegethon', 'harpy', 'lucifer']);
+});
+
+test('Soothsayer draws an extra card at the start of its owner\'s turn, without burnout', () => {
+  const s = setup({ field1: ['soothsayer'] });
+  const p = s.players[1];
+  const before = p.hand.length;
+  E.goToAttack(s); E.declareAttack(s, []); E.endTurn(s);
+  assert.equal(p.hand.length, before + 2);
+  p.deck = [inst('ember-ash')];
+  E.goToAttack(s); E.declareAttack(s, []); E.endTurn(s);
+  E.goToAttack(s); E.declareAttack(s, []); E.endTurn(s);
+  assert.equal(p.health, RULES.startingHealth, 'the regular draw took the last card; Foresight finds nothing');
 });

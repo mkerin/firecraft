@@ -83,6 +83,17 @@ function drawCard(state, pi) {
   return inst || null;
 }
 
+// A bonus draw from an ability. An empty deck just means no card (no burnout).
+function drawExtra(state, pi, source) {
+  const p = state.players[pi];
+  const drawn = drawCard(state, pi);
+  if (drawn) {
+    log(state, `${p.name} draws a card from ${source}.`, 'draw',
+      { player: pi, text: `${p.name} draws ${card(drawn).name} from ${source}.` });
+  }
+  return drawn;
+}
+
 function damage(state, pi, amount, source) {
   if (amount <= 0) return;
   const p = state.players[pi];
@@ -152,6 +163,9 @@ function beginTurn(state) {
     checkWinner(state);
     if (state.winner !== null) return;
   }
+  for (const seer of p.field.filter((c) => hasAbility(card(c), 'foresight'))) {
+    if (!drawExtra(state, p.index, `${card(seer).name}'s Foresight`)) break;
+  }
   state.phase = 'summon';
 }
 
@@ -176,7 +190,8 @@ export function paymentFor(player, def) {
     pay.push(m.uid);
     return true;
   };
-  const needs = def.costEach ? [...TYPES] : Array(def.cost).fill(def.type);
+  const avarice = !def.costEach && player.field.some((c) => hasAbility(card(c), 'avarice'));
+  const needs = def.costEach ? [...TYPES] : Array(Math.max(1, def.cost - (avarice ? 1 : 0))).fill(def.type);
   const missing = needs.filter((t) => !take(t));
   for (let i = 0; i < missing.length; i++) if (!take('wild')) return null;
   return pay;
@@ -266,14 +281,16 @@ export function redrawHand(state) {
   const p = activePlayer(state);
   const discarded = p.hand.splice(0);
   p.discard.push(...discarded);
+  const simony = 2 * p.field.filter((c) => hasAbility(card(c), 'simony')).length;
   const drawn = [];
-  for (let i = 0; i < discarded.length; i++) {
+  for (let i = 0; i < discarded.length + simony; i++) {
     const c = drawCard(state, p.index);
     if (!c) break;
     drawn.push(c);
   }
   log(state, `${p.name} discards their hand (${describeCards(discarded.map((c) => c.cardId))}) and skips summoning.`, 'draw');
-  const short = drawn.length < discarded.length ? ` The deck ran out after ${drawn.length}.` : '';
+  const short = drawn.length < discarded.length + simony ? ` The deck ran out after ${drawn.length}.` : '';
+  if (simony) log(state, `Simony buys ${p.name} ${simony} extra cards.`);
   log(state, `${p.name} draws ${drawn.length} new cards.${short}`, 'draw',
     { player: p.index, text: `${p.name} draws ${describeCards(drawn.map((c) => c.cardId))}.${short}` });
   state.phase = 'attack';
@@ -401,6 +418,7 @@ export function previewCombat(state, blocks) {
   const blockRows = [];
   const slainAttackers = [];
   let hooks = false;
+  let usury = 0;
   for (const row of attackRows) {
     const aDef = card(row.cardId);
     let remaining = row.atk;
@@ -420,6 +438,7 @@ export function previewCombat(state, blocks) {
     }
     row.through = remaining;
     if (remaining > 0 && hasAbility(aDef, 'hooks')) hooks = true;
+    if (remaining > 0 && hasAbility(aDef, 'usury')) usury++;
   }
   // Report blockers in the order the defender chose them.
   blockRows.sort((x, y) => pairs.findIndex((p) => p.b.uid === x.uid) - pairs.findIndex((p) => p.b.uid === y.uid));
@@ -433,6 +452,8 @@ export function previewCombat(state, blocks) {
     damage: attackRows.reduce((s, r) => s + r.through, 0),
     slainAttackers,
     hooks,
+    usury,
+    hoards: blockRows.filter((r) => !r.destroyed && hasAbility(card(r.cardId), 'hoard')).map((r) => r.uid),
   };
 }
 
@@ -458,6 +479,14 @@ export function declareBlock(state, blocks) {
     const victim = dfn.hand[Math.floor(state.rng() * dfn.hand.length)];
     dfn.discard.push(removeFrom(dfn.hand, victim.uid));
     log(state, `Malacoda's hooks tear ${card(victim).name} from ${dfn.name}'s hand.`);
+  }
+  for (let i = 0; i < result.usury; i++) drawExtra(state, att.index, 'Usury');
+  for (const uid of result.hoards) {
+    const embers = dfn.discard.filter((c) => card(c).kind === 'ember');
+    if (!embers.length) break;
+    const ember = embers[Math.floor(state.rng() * embers.length)];
+    dfn.hand.push(removeFrom(dfn.discard, ember.uid));
+    log(state, `${card(dfn.field.find((c) => c.uid === uid)).name.split(',')[0]} hoards ${card(ember).name} back into ${dfn.name}'s hand.`);
   }
   state.lastCombat = result;
   state.attack = null;

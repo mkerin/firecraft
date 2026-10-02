@@ -476,7 +476,9 @@ function combatHtml(r, baseline = null) {
     <div><h4>Blocks</h4><ul>${blkRows || '<li class="muted">No blockers</li>'}</ul></div>
     <div class="verdict">${r.totalAttack} ATK → ${esc(dfn.name)} takes <b class="dmg">${r.damage}</b>
       ${baseline !== null && r.blockRows.length ? `<small class="${baseline <= r.damage ? 'tag bad' : ''}">(no block: ${baseline})</small>` : ''}
-      ${r.hooks ? '<small class="tag bad">Hooks: discards a card</small>' : ''}</div>
+      ${r.hooks ? '<small class="tag bad">Hooks: discards a card</small>' : ''}
+      ${r.usury ? `<small class="tag">Usury: draws ${r.usury}</small>` : ''}
+      ${r.hoards?.length ? `<small class="tag good">Hoard: ${r.hoards.length} Ember${r.hoards.length > 1 ? 's' : ''} back</small>` : ''}</div>
   </div>`;
 }
 
