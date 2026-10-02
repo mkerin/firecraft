@@ -1,5 +1,6 @@
-// Browser UI: title -> deck building -> battle, either hot-seat (two people, one device) or against the
-// computer (ai.js). All game rules live in engine.js.
+// Browser UI: title -> deck building -> battle, either hot-seat (two people, one device), against the
+// computer (ai.js), or online (net.js: login -> lobby -> battle, with the server running the engine).
+// All game rules live in engine.js.
 
 import {
   CARDS, CARDS_BY_ID, TYPES, TYPE_INFO, BEATS, BEAT_VERB, ABILITIES, RULES,
@@ -7,6 +8,7 @@ import {
 } from './cards.js';
 import * as E from './engine.js';
 import * as AI from './ai.js';
+import * as Net from './net.js';
 import { ART_DEFS, cardArt } from './art.js';
 
 const store = {
@@ -22,6 +24,7 @@ const store = {
 };
 
 const SAVE_KEY = 'firecraft.save';
+const NET_KEY = 'firecraft.online'; // { token } for online play
 const CPU_NAME = 'Virgil';
 const CPU_INDEX = 1; // against the computer, the human is always player 0
 
@@ -43,12 +46,23 @@ const app = {
   openInfo: new Set(), // uids whose info drawer is pinned open
   confirming: null, // action awaiting its confirming second click
   cpu: null, // index of the computer player, or null for hot-seat
+  net: null, // online session: { token, conn, lobby, status: connecting | open | offline | outdated }
+  remote: null, // the online game on screen: { id, seat }. app.game is then the server's view of it.
+  loginError: null,
+  showCode: false,
 };
 
-const cpuActing = () => {
+// The seat this device plays, or null in hot-seat, where the device follows the turn.
+const mySeat = () => (app.remote ? app.remote.seat : app.cpu !== null ? 1 - app.cpu : null);
+
+// True while the other side (the computer or an online opponent) has to act.
+const waitingOnOther = () => {
   const g = app.game;
-  return app.cpu !== null && g && g.winner === null && AI.actor(g).index === app.cpu;
+  const seat = mySeat();
+  return seat !== null && g && g.winner === null && E.actor(g).index !== seat;
 };
+
+const cpuActing = () => app.cpu !== null && waitingOnOther();
 
 const root = document.getElementById('app');
 const esc = (s) => String(s).replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
@@ -160,6 +174,7 @@ function renderTitle() {
     <div class="modes">
       <button class="btn ${store.get(SAVE_KEY) ? '' : 'primary'} big" data-action="start-cpu" title="You build a deck; ${CPU_NAME} brings a random one">Play against ${CPU_NAME}</button>
       <button class="btn big" data-action="start-build" title="Two players taking turns on this device">Two players, one device</button>
+      <button class="btn big" data-action="online" title="Challenge other players on their own devices">Play online</button>
     </div>
     <section class="rules">
       <h3>How a turn works</h3>
@@ -175,6 +190,11 @@ function renderTitle() {
 }
 
 // ---------- deck builder ----------
+
+function builderEyebrow(b) {
+  if (b.online) return b.online.type === 'challenge' ? `Challenging ${esc(b.online.name)}` : `Answering ${esc(b.online.name)}'s challenge`;
+  return app.cpu !== null ? `${CPU_NAME} brings a random deck` : `Deck ${b.pi + 1} of 2`;
+}
 
 function renderBuild() {
   const b = app.build;
@@ -202,7 +222,7 @@ function renderBuild() {
   return `<div class="builder">
     <div class="builder-main">
       <header class="topbar">
-        <div><div class="eyebrow">${app.cpu !== null ? `${CPU_NAME} brings a random deck` : `Deck ${b.pi + 1} of 2`}</div><h2>${esc(app.names[b.pi])}, forge your deck</h2></div>
+        <div><div class="eyebrow">${builderEyebrow(b)}</div><h2>${esc(b.online ? app.net.lobby.me.name : app.names[b.pi])}, forge your deck</h2></div>
         <div class="filters">${filters.map((f) => `<button class="pill ${f === b.filter ? 'on' : ''} ${TYPES.includes(f) ? `t-${f}` : ''}" data-action="filter" data-filter="${f}">${filterLabel(f)}</button>`).join('')}</div>
       </header>
       <p class="hint">Click a card to add it, right-click (or −) to remove. Take as many copies as you like, except Lucifer (1) and Hellfire Embers (2).</p>
@@ -229,6 +249,7 @@ function renderBuild() {
         <button class="btn" data-action="random">Random deck</button>
         ${saved ? '<button class="btn" data-action="load">Load last deck</button>' : ''}
         <button class="btn ghost" data-action="clear">Clear</button>
+        ${b.online ? '<button class="btn ghost" data-action="lobby">Back to lobby</button>' : ''}
       </div>
       ${v.errors.filter((e) => !e.startsWith('Deck has')).map((e) => `<p class="msg error">${esc(e)}</p>`).join('')}
       ${v.warnings.map((w) => `<p class="msg warn">${esc(w)}</p>`).join('')}
@@ -359,7 +380,7 @@ function unitHtml(p, inst) {
   if (app.openInfo.has(inst.uid)) cls.push('info-open');
   const sick = isActive && inst.summonedTurn === g.turn && !hasAbility(def, 'charge') && !hasAbility(def, 'cannot-attack');
   const def2 = E.currentDef(inst);
-  const martyrBtn = E.canMartyr(g, p.index, inst.uid).ok && p.index !== app.cpu
+  const martyrBtn = E.canMartyr(g, p.index, inst.uid).ok && (mySeat() === null || p.index === mySeat())
     ? `<button class="mini-btn" data-action="martyr" data-owner="${p.index}" data-uid="${inst.uid}" title="Destroy it to restore 6 health">Martyr +6</button>`
     : '';
   return `<div class="${cls.join(' ')}" data-action="unit" data-uid="${inst.uid}" data-owner="${p.index}" data-card="${def.id}" title="${esc(title)}">
@@ -381,7 +402,7 @@ function handCard(inst) {
   const def = card(inst);
   const cls = [];
   let title = '';
-  if (def.kind === 'creature' && g.phase === 'summon' && !app.sel.moloch) {
+  if (def.kind === 'creature' && g.phase === 'summon' && !app.sel.moloch && !waitingOnOther()) {
     const check = E.canSummon(g, inst.uid);
     cls.push(check.ok ? 'playable' : 'unplayable');
     title = check.ok ? 'Click to summon' : check.reason;
@@ -471,9 +492,9 @@ function phaseBar() {
   let buttons = '';
   let extra = '';
 
-  if (cpuActing()) {
+  if (waitingOnOther()) {
     const doing = { summon: 'is summoning', attack: 'is choosing attackers', block: 'is choosing blockers', end: 'surveys the field' };
-    prompt = `<span class="thinking">${esc(CPU_NAME)} ${doing[g.phase] || 'is thinking'}…</span>`;
+    prompt = `<span class="thinking">${esc(E.actor(g).name)} ${doing[g.phase] || 'is thinking'}…</span>`;
     if (g.phase === 'block') extra = combatHtml(E.previewCombat(g, []));
     if (g.phase === 'end' && g.lastCombat) extra = combatHtml(g.lastCombat);
   } else if (g.phase === 'summon') {
@@ -530,12 +551,13 @@ function renderBattle() {
   const g = app.game;
   // Hot-seat: the active player sits at the bottom, and their hand is hidden while the defender holds the device.
   // Against the computer, the human always sits at the bottom and always sees their own hand.
-  const vsCpu = app.cpu !== null;
-  const me = vsCpu ? g.players[1 - app.cpu] : E.activePlayer(g);
+  // Online, each player sits at the bottom of their own screen in the same way.
+  const seat = mySeat();
+  const me = seat !== null ? g.players[seat] : E.activePlayer(g);
   const foe = g.players[1 - me.index];
-  const hideHand = !vsCpu && g.phase === 'block';
+  const hideHand = seat === null && g.phase === 'block';
   // Whoever holds the device sees their own secret entries (e.g. the names of cards they drew).
-  const viewer = vsCpu ? me.index : hideHand ? foe.index : me.index;
+  const viewer = hideHand ? foe.index : me.index;
   const log = g.log.slice(-120).reverse().map((e) => {
     const text = e.secret?.player === viewer ? e.secret.text : e.text;
     return `<li class="log-${e.kind}"><span class="lt">${e.turn}</span>${esc(text)}</li>`;
@@ -552,17 +574,18 @@ function renderBattle() {
       ${playerBar(me, 'me')}
     </main>
     <aside class="sidebar">
+      ${netBanner()}
       <div id="inspector" class="inspector">${inspectorDefault()}</div>
       <h4>Chronicle</h4>
       <ul class="log">${log}</ul>
-      <button class="btn ghost small" data-action="quit" title="The battle is saved after every move">Save &amp; quit to title</button>
+      ${app.remote ? onlineBattleButtons() : '<button class="btn ghost small" data-action="quit" title="The battle is saved after every move">Save &amp; quit to title</button>'}
     </aside>
     ${winner ? `<div class="overlay"><div class="victory">
       <div class="eyebrow">Turn ${g.turn}</div>
       <h1>${esc(winner.name)} triumphs</h1>
       <p>${esc(g.players[1 - g.winner].name)} is consumed by the flames.</p>
-      <div class="actions"><button class="btn primary big" data-action="rematch">Rematch</button>
-      <button class="btn big" data-action="new-decks">Forge new decks</button></div>
+      <div class="actions">${app.remote ? '<button class="btn primary big" data-action="lobby">Back to the lobby</button>' : `<button class="btn primary big" data-action="rematch">Rematch</button>
+      <button class="btn big" data-action="new-decks">Forge new decks</button>`}</div>
     </div></div>` : ''}
   </div>`;
 }
@@ -580,7 +603,7 @@ function startGame(firstPlayer = 0) {
 // The whole engine state is plain data apart from its rng, so it round-trips through JSON.
 function saveGame() {
   const g = app.game;
-  if (!g) return;
+  if (!g || app.remote) return; // online games live on the server
   if (g.winner !== null) { store.remove(SAVE_KEY); return; }
   store.set(SAVE_KEY, { game: { ...g, rng: undefined }, decks: app.decks, names: app.names, cpu: app.cpu, savedAt: Date.now() });
 }
@@ -626,8 +649,10 @@ function showTurnPass(prefix = '') {
   app.screen = 'pass';
 }
 
-function startBuild(pi) {
-  app.build = { pi, counts: app.decks[pi] ? { ...app.decks[pi] } : {}, filter: 'all' };
+// online: { type: 'challenge', to, name } or { type: 'accept', id, name } when building a deck for an online game.
+function startBuild(pi, online = null) {
+  const last = online ? store.get('firecraft.deck.0') : app.decks[pi];
+  app.build = { pi, counts: last ? { ...last } : {}, filter: 'all', online };
   app.screen = 'build';
 }
 
@@ -635,6 +660,14 @@ function startBuild(pi) {
 function run(result) {
   if (result && !result.ok) app.toast = result.reason;
   return result?.ok;
+}
+
+// Play a move given as data: locally through the engine, or online by sending it to the server, which
+// answers with the new view (or an error toast). Online it returns true as soon as the move is sent.
+function perform(action) {
+  if (!app.remote) return run(E.applyAction(app.game, action));
+  if (send({ type: 'act', game: app.remote.id, action })) return true;
+  return false;
 }
 
 const actions = {
@@ -658,6 +691,12 @@ const actions = {
     const pi = app.build.pi;
     app.decks[pi] = { ...app.build.counts };
     store.set(`firecraft.deck.${pi}`, app.decks[pi]);
+    const online = app.build.online;
+    if (online) {
+      const deck = app.decks[pi];
+      if (send(online.type === 'challenge' ? { type: 'challenge', to: online.to, deck } : { type: 'accept', id: online.id, deck })) app.screen = 'lobby';
+      return;
+    }
     if (app.cpu !== null) {
       app.decks[app.cpu] = randomDeck();
       return startGame(Math.random() < 0.5 ? 0 : 1);
@@ -680,7 +719,7 @@ const actions = {
     const check = E.canSummon(g, uid);
     if (!check.ok) { if (card(E.activePlayer(g).hand.find((c) => c.uid === uid)).kind === 'creature') app.toast = check.reason; return; }
     if (check.needsSacrifice) app.sel.moloch = uid;
-    else run(E.summon(g, uid));
+    else perform({ type: 'summon', uid });
   },
   'cancel-moloch': () => { app.sel.moloch = null; },
   unit: (d) => {
@@ -688,7 +727,7 @@ const actions = {
     const uid = Number(d.uid);
     const owner = Number(d.owner);
     if (g.phase === 'summon' && app.sel.moloch && owner === g.active) {
-      run(E.summon(g, app.sel.moloch, { sacrificeUid: uid }));
+      perform({ type: 'summon', uid: app.sel.moloch, sacrificeUid: uid });
       app.sel.moloch = null;
     } else if (g.phase === 'attack' && owner === g.active) {
       const list = app.sel.attackers;
@@ -720,24 +759,24 @@ const actions = {
     const uid = Number(d.uid);
     app.sel.blocks = app.sel.blocks.filter((b) => b.blocker !== uid);
     if (app.sel.picking === uid) app.sel.picking = null;
-    run(E.martyr(app.game, Number(d.owner), uid));
+    perform({ type: 'martyr', owner: Number(d.owner), uid });
   },
   // Native confirm() is suppressed in some embedded browsers, so risky buttons ask for a second click instead.
   redraw: (d, confirmed) => {
     if (!confirmed) { app.confirming = 'redraw'; return; }
-    if (run(E.redrawHand(app.game))) {
+    if (perform({ type: 'redraw' })) {
       app.sel.attackers = E.forcedAttackers(app.game);
       app.drawnUid = null;
     }
   },
   'to-attack': () => {
-    if (run(E.goToAttack(app.game))) app.sel.attackers = E.forcedAttackers(app.game);
+    if (perform({ type: 'to-attack' })) app.sel.attackers = E.forcedAttackers(app.game);
   },
-  attack: () => { if (run(E.declareAttack(app.game, app.sel.attackers))) app.sel = freshSelection(); },
-  'skip-attack': () => { run(E.declareAttack(app.game, [])); },
+  attack: () => { if (perform({ type: 'attack', uids: app.sel.attackers })) app.sel = freshSelection(); },
+  'skip-attack': () => { perform({ type: 'attack', uids: [] }); },
   'clear-blocks': () => { app.sel.blocks = []; app.sel.picking = null; },
-  block: () => { if (run(E.declareBlock(app.game, app.sel.blocks))) app.sel = freshSelection(); },
-  'end-turn': () => { if (run(E.endTurn(app.game))) showTurnPass(); },
+  block: () => { if (perform({ type: 'block', blocks: app.sel.blocks })) app.sel = freshSelection(); },
+  'end-turn': () => { if (perform({ type: 'end-turn' }) && !app.remote) showTurnPass(); },
   info: (d) => {
     const uid = Number(d.uid);
     if (app.openInfo.has(uid)) app.openInfo.delete(uid);
@@ -752,12 +791,187 @@ const actions = {
   },
   'cancel-confirm': () => {},
   quit: () => { app.screen = 'title'; },
+
+  // ---------- online ----------
+  online: () => {
+    const saved = store.get(NET_KEY);
+    if (saved?.token) goOnline(saved.token);
+    else app.screen = 'login';
+  },
+  login: async () => {
+    const name = root.querySelector('[name=login-name]')?.value ?? '';
+    const code = root.querySelector('[name=login-code]')?.value.trim();
+    app.loginError = null;
+    const res = await Net.login(code ? { token: code } : { name });
+    if (res.error) app.loginError = res.error;
+    else { store.set(NET_KEY, { token: res.token }); goOnline(res.token); }
+    render();
+  },
+  title: () => { leaveOnline(); app.screen = 'title'; },
+  lobby: () => { app.remote = null; app.game = null; app.screen = 'lobby'; },
+  'device-code': () => { app.showCode = !app.showCode; },
+  reload: () => location.reload(),
+  challenge: (d) => startBuild(0, { type: 'challenge', to: Number(d.id), name: d.name }),
+  accept: (d) => startBuild(0, { type: 'accept', id: Number(d.id), name: d.name }),
+  decline: (d) => { send({ type: 'decline', id: Number(d.id) }); },
+  'cancel-challenge': (d) => { send({ type: 'cancel', id: Number(d.id) }); },
+  'open-game': (d) => { send({ type: 'open', game: Number(d.id) }); },
+  concede: (d, confirmed) => {
+    if (confirmed) send({ type: 'concede', game: app.remote.id });
+    else app.confirming = 'concede';
+  },
 };
+
+// ---------- online ----------
+
+function send(msg) {
+  if (app.net?.conn.send(msg)) return true;
+  app.toast = 'Not connected to the server. Reconnecting…';
+  return false;
+}
+
+function goOnline(token) {
+  leaveOnline();
+  const net = { token, lobby: null, status: 'connecting' };
+  net.conn = Net.connect(token, {
+    onMessage: onNetMessage,
+    onStatus: (status) => {
+      net.status = status;
+      // After a reconnect, ask for the game on screen again in case moves were missed.
+      if (status === 'open' && app.remote) net.conn.send({ type: 'open', game: app.remote.id });
+      render();
+    },
+  });
+  app.net = net;
+  app.screen = 'lobby';
+}
+
+function leaveOnline() {
+  app.net?.conn.close();
+  app.net = null;
+  app.remote = null;
+}
+
+function onNetMessage(msg) {
+  if (msg.type === 'lobby') {
+    app.net.lobby = msg;
+    if (app.screen !== 'lobby') return;
+  } else if (msg.type === 'game') {
+    if (app.remote?.id === msg.id && app.screen === 'battle') updateRemoteGame(msg.view);
+    else if (msg.open) enterRemoteGame(msg);
+    else return;
+  } else if (msg.type === 'error') {
+    app.toast = msg.reason;
+  } else if (msg.type === 'auth-failed') {
+    store.remove(NET_KEY);
+    leaveOnline();
+    app.loginError = 'Your sign-in was not recognised. Please sign in again.';
+    app.screen = 'login';
+  } else if (msg.type === 'outdated') {
+    app.net.status = 'outdated';
+  }
+  render();
+}
+
+function enterRemoteGame({ id, seat, view }) {
+  app.remote = { id, seat };
+  app.cpu = null;
+  app.game = view;
+  app.sel = freshSelection();
+  app.drawnUid = null;
+  app.openInfo = new Set();
+  app.knownUids = new Set(view.players.flatMap((p) => p.field.map((c) => c.uid)));
+  app.screen = 'battle';
+}
+
+// A new view from the server: flash damage, and start a fresh selection when the phase moves on.
+function updateRemoteGame(view) {
+  const old = app.game;
+  const seat = app.remote.seat;
+  app.game = view;
+  app.flash = view.players.map((p, i) => p.health < old.players[i].health);
+  if (view.turn !== old.turn || view.phase !== old.phase) {
+    app.sel = freshSelection();
+    if (view.phase === 'attack' && view.active === seat) app.sel.attackers = E.forcedAttackers(view);
+  }
+  if (view.turn !== old.turn) app.drawnUid = view.active === seat ? view.players[seat].hand.at(-1)?.uid ?? null : null;
+}
+
+function netBanner() {
+  const status = app.net?.status;
+  if (status === 'outdated') return '<div class="net-banner">A new version of Firecraft is out. <button class="btn small primary" data-action="reload">Refresh</button></div>';
+  if (status === 'offline') return '<div class="net-banner">Connection lost. Reconnecting…</div>';
+  return '';
+}
+
+function onlineBattleButtons() {
+  const concede = app.confirming === 'concede'
+    ? '<button class="btn small danger" data-action="concede">Really concede?</button><button class="btn ghost small" data-action="cancel-confirm">No</button>'
+    : `<button class="btn ghost small" data-action="concede" ${app.game.winner !== null ? 'disabled' : ''}>Concede</button>`;
+  return `<div class="actions">${concede}<button class="btn ghost small" data-action="lobby" title="The battle carries on; come back any time">Back to lobby</button></div>`;
+}
+
+function renderLogin() {
+  return `<div class="lobby login">
+    <h1 class="logo">Firecraft</h1>
+    <form class="login-form" data-submit="login">
+      <label>Your wizard name<input name="login-name" maxlength="20" autocomplete="off" value="${esc(app.names[0])}"></label>
+      <details><summary>Signed in on another device?</summary>
+        <label>Paste the sign-in code it shows<input name="login-code" autocomplete="off"></label>
+      </details>
+      ${app.loginError ? `<p class="msg error">${esc(app.loginError)}</p>` : ''}
+      <div class="actions"><button class="btn primary big" type="submit">Enter</button>
+      <button class="btn ghost" type="button" data-action="title">Back</button></div>
+      <p class="hint">No password for now: the name is yours on this device. Use the sign-in code to add another device.</p>
+    </form>
+  </div>`;
+}
+
+function renderLobby() {
+  const net = app.net;
+  const l = net.lobby;
+  if (!l) return `<div class="lobby">${netBanner()}<p class="muted">Connecting to the inferno…</p><button class="btn ghost" data-action="title">Back</button></div>`;
+  const row = (inner, cls = '') => `<li class="lrow ${cls}">${inner}</li>`;
+  const active = l.games.filter((g) => !g.finished);
+  const finished = l.games.filter((g) => g.finished).slice(0, 5);
+  const incoming = l.challenges.filter((c) => c.toId === l.me.id);
+  const outgoing = l.challenges.filter((c) => c.fromId === l.me.id);
+  const gameRow = (g) => row(`<span class="who">vs ${esc(g.opponent.name)}</span>
+    <span class="state">${g.finished ? (g.won ? 'You won' : 'You lost') : g.yourMove ? '<b>Your move</b>' : 'Their move'} · turn ${g.turn} · ${timeAgo(g.updated)}</span>
+    <button class="btn small ${g.yourMove ? 'primary' : ''}" data-action="open-game" data-id="${g.id}">${g.finished ? 'View' : 'Continue'}</button>`, g.yourMove ? 'hot' : '');
+  return `<div class="lobby">
+    ${netBanner()}
+    <header class="topbar">
+      <div><div class="eyebrow">Online</div><h2>Welcome, ${esc(l.me.name)}</h2></div>
+      <div class="actions"><button class="btn ghost small" data-action="device-code">Sign in on another device</button>
+      <button class="btn ghost small" data-action="title">Back to title</button></div>
+    </header>
+    ${app.showCode ? `<p class="msg">Your sign-in code is <code>${esc(net.token)}</code>. On the other device, choose Play online and paste it under "Signed in on another device?". Keep it private: anyone with it can play as you.</p>` : ''}
+    ${app.toast ? `<div class="toast">${esc(app.toast)}</div>` : ''}
+    <section><h3>Your battles</h3>
+      <ul class="lrows">${active.map(gameRow).join('') || '<li class="muted">No battles yet. Challenge someone below.</li>'}</ul>
+      ${finished.length ? `<h4>Finished</h4><ul class="lrows">${finished.map(gameRow).join('')}</ul>` : ''}
+    </section>
+    <section><h3>Challenges</h3><ul class="lrows">
+      ${incoming.map((c) => row(`<span class="who">${esc(c.fromName)}</span><span class="state">challenges you</span>
+        <button class="btn small primary" data-action="accept" data-id="${c.id}" data-name="${esc(c.fromName)}">Accept</button>
+        <button class="btn small ghost" data-action="decline" data-id="${c.id}">Decline</button>`, 'hot')).join('')}
+      ${outgoing.map((c) => row(`<span class="who">${esc(c.toName)}</span><span class="state">waiting for them to accept</span>
+        <button class="btn small ghost" data-action="cancel-challenge" data-id="${c.id}">Cancel</button>`)).join('')}
+      ${incoming.length || outgoing.length ? '' : '<li class="muted">No open challenges.</li>'}
+    </ul></section>
+    <section><h3>Wizards</h3><ul class="lrows">
+      ${l.players.map((p) => row(`<span class="who"><span class="online-dot ${p.online ? 'on' : ''}" title="${p.online ? 'Online now' : 'Offline'}"></span>${esc(p.name)}</span>
+        <button class="btn small" data-action="challenge" data-id="${p.id}" data-name="${esc(p.name)}" ${outgoing.some((c) => c.toId === p.id) ? 'disabled' : ''}>Challenge</button>`)).join('')
+        || '<li class="muted">No one else is here yet. Send a friend the link.</li>'}
+    </ul></section>
+  </div>`;
+}
 
 // ---------- rendering & events ----------
 
 function render() {
-  const screens = { title: renderTitle, build: renderBuild, pass: renderPass, battle: renderBattle };
+  const screens = { title: renderTitle, build: renderBuild, pass: renderPass, battle: renderBattle, login: renderLogin, lobby: renderLobby };
   root.innerHTML = screens[app.screen]();
   app.toast = null;
   app.flash = [false, false];
@@ -789,11 +1003,13 @@ function scheduleCpu() {
   }, delay);
 }
 
+// While the other side is acting, the board is read-only apart from these.
+const WHILE_WAITING = ['info', 'quit', 'lobby', 'concede', 'cancel-confirm', 'reload'];
+
 root.addEventListener('click', (e) => {
   const el = e.target.closest('[data-action]');
   if (!el || el.disabled) return;
-  // While the computer is acting, the board is read-only apart from inspecting cards and leaving.
-  if (app.screen === 'battle' && cpuActing() && !['info', 'quit'].includes(el.dataset.action)) return;
+  if (app.screen === 'battle' && waitingOnOther() && !WHILE_WAITING.includes(el.dataset.action)) return;
   const before = app.game?.players.map((p) => p.health);
   // A confirmation only lasts one click: clicking anything else cancels it.
   const confirmed = app.confirming === el.dataset.action;
@@ -802,6 +1018,12 @@ root.addEventListener('click', (e) => {
   if (before && app.game) app.flash = app.game.players.map((p, i) => p.health < before[i]);
   if (app.screen === 'battle' || app.screen === 'pass') saveGame();
   render();
+});
+
+// Forms (the online sign-in) submit with Enter as well as their button.
+root.addEventListener('submit', (e) => {
+  e.preventDefault();
+  actions[e.target.dataset.submit]?.();
 });
 
 root.addEventListener('contextmenu', (e) => {

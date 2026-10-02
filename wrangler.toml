@@ -1,0 +1,16 @@
+# Online play: `npx wrangler dev` runs it locally (http://localhost:8787); `npx wrangler deploy` publishes it.
+name = "firecraft"
+main = "server/worker.js"
+compatibility_date = "2026-09-01"
+
+# The game's static files are served straight from the repo root (see .assetsignore).
+[assets]
+directory = "."
+
+[[durable_objects.bindings]]
+name = "WORLD"
+class_name = "World"
+
+[[migrations]]
+tag = "v1"
+new_sqlite_classes = ["World"]

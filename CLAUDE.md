@@ -6,6 +6,7 @@ Two-player hot-seat card game in the browser. Each player is a "firecrafting wiz
 
 - Public repo: https://github.com/mkerin/firecraft. GitHub Pages serves `main` (root) at https://mkerin.github.io/firecraft/, and every push to `main` redeploys within a minute or two. `.nojekyll` makes Pages serve the files as-is.
 - Use relative asset paths only (the site lives under `/firecraft/`, not `/`).
+- **Online play** runs on Cloudflare (Workers free plan): one Worker serves the game files *and* the server, so the page and API share an origin (no CORS). `wrangler.toml` serves the repo root as static assets; `.assetsignore` keeps everything except the game files private. Deploy with `npx wrangler deploy` (the user must have run `npx wrangler login`). Until the user moves everyone over, GitHub Pages still serves the client; "Play online" there just reports that online play isn't available.
 - Players' saves and decks are in their own browser's localStorage. Changing the save shape can break "Continue" for live players, so keep old saves loadable or discard them gracefully.
 
 ## Run & test
@@ -13,14 +14,19 @@ Two-player hot-seat card game in the browser. Each player is a "firecrafting wiz
 - Serve: `.venv/bin/python -m http.server 8123` (also the `firecraft` config in `.claude/launch.json`), open http://localhost:8123. ES modules need HTTP; `file://` won't work.
 - Tests: `npm test` (Node's built-in `node:test`, `tests/engine.test.mjs`). Keep them green; add a test for every new rule.
 - Python lives in the project `.venv` (made with `uv`); it is only used to serve files.
+- Online, locally: the `firecraft-online` launch config runs `npx wrangler dev` on http://localhost:8787 (no Cloudflare login needed). Its database lives in `../.firecraft-dev-state`, outside the repo: inside the Dropbox-synced repo it made wrangler reload every second and drop every socket. Use `localhost` for one player and `127.0.0.1` for a second, since they are separate origins with separate storage.
+- `node server/smoke.mjs [url]` (with the server running) signs up two users, challenges, and plays a whole game over the socket with the AI. Run it after server changes.
+- Wrangler runs via `npx` (no `node_modules` in the Dropbox folder).
 
 ## Layout
 
 - `js/cards.js`: card pool, `RULES` constants, type wheel (`BEATS`), ability text (`ABILITIES`), deck helpers (`validateDeck`, `fillWithEmbers`, `randomDeck`). No DOM access.
-- `js/engine.js`: all game rules. Pure and DOM-free so the UI, tests and a future AI player share it. Actions mutate the state and return `{ ok, reason }` instead of throwing. Blocks are `[{ blocker, attacker }]` uids in the defender's order. `previewCombat(state, blocks)` computes the result without mutating; `declareBlock` validates it (`blockProblem`) and applies it.
+- `js/engine.js`: all game rules. `applyAction(state, {type, ...})` runs a move given as data (used by the AI and the server), `actor(state)` is who must act, `viewFor(state, seat)` is what one player may see (other hand and both decks become `{hidden: true}`, other players' log secrets removed), and `concede`. Pure and DOM-free so the UI, tests and a future AI player share it. Actions mutate the state and return `{ ok, reason }` instead of throwing. Blocks are `[{ blocker, attacker }]` uids in the defender's order. `previewCombat(state, blocks)` computes the result without mutating; `declareBlock` validates it (`blockProblem`) and applies it.
 - `js/ai.js`: the computer opponent ("Virgil"). `chooseAction(state)` returns the next action for whoever must act (the defender during a block, otherwise the active player), and `applyAction` performs it through the engine. Rules: martyr when at or below 30% health; summon the costliest affordable creature (Moloch eats the weakest non-Lucifer creature, and only if that's an upgrade); attack with everything that can (attackers never take damage except from Salt); block greedily, adding whichever single blocker→attacker pairing most improves a score until none does. The score: −damage (×2 at low health), −1000 for lethal, −worth of lost blockers, +worth of salted attackers. It never redraws. Tests are in `tests/ai.test.mjs`.
 - `js/art.js`: a hand-built SVG scene (200×140) per card. Shared gradients/filters are in `ART_DEFS`, injected into the page once.
-- `js/ui.js`: screens (title → deck builder P1 → pass → builder P2 → pass → battle; vs computer: title → builder → battle). Re-renders `#app` via `innerHTML`, with event delegation on `data-action`.
+- `js/ui.js`: screens (title → deck builder P1 → pass → builder P2 → pass → battle; vs computer: title → builder → battle; online: title → login → lobby → builder (to challenge or accept) → battle). Re-renders `#app` via `innerHTML`, with event delegation on `data-action`.
+- `js/net.js`: online transport. `login()` over HTTP, then `connect()` opens one WebSocket that sends `{type:'hello', token, v: PROTOCOL}` first and reconnects with backoff.
+- `server/worker.js`: the Worker plus one Durable Object, `World`, that holds every user, challenge and game in its SQLite (tables `users`, `challenges`, `games`; game state is engine JSON). It runs the engine as the authority: `act` checks the sender is `E.actor` (or owns the martyr), calls `E.applyAction`, saves, and pushes each player `E.viewFor(state, seat)` plus a fresh lobby. Decks from clients go through `cleanDeck` + `validateDeck`. One object for everything is deliberate (simplest code); split games into their own objects only if it ever gets busy.
 - `css/style.css`: all styling. Type colors come from `.t-<type>` setting `--tc`.
 
 ## Rules as implemented (agreed with the user)
@@ -38,7 +44,8 @@ Two-player hot-seat card game in the browser. Each player is a "firecrafting wiz
 
 ## UI behaviour worth preserving
 
-- **Two modes:** "Play against Virgil" (`app.cpu = 1`: the human is player 0, Virgil gets `randomDeck()`, the first player is random, and there are no pass screens) and "Two players, one device" (hot-seat, `app.cpu = null`). `cpu` is stored in the save. Against the computer, the human always sits at the bottom and sees their own hand. `scheduleCpu()` runs after every render and performs one computer action per timeout (about 1s, or 2.6s to linger on a combat result). Clicks are ignored while the computer acts, except info and quit.
+- **Online:** login is a name with no password; the server returns a token (localStorage `firecraft.online`) that *is* the login, and "Sign in on another device" shows it so it can be pasted on another device. In an online battle `app.remote = { id, seat }` and `app.game` is the server's view; moves go through `perform(action)` → `send({type:'act'})` and the screen updates when the new view arrives (`updateRemoteGame`). Online games are never saved to localStorage. `PROTOCOL` in `cards.js` is checked on connect; bump it when messages or rules change in a way that matters, and old pages show a Refresh banner.
+- **Modes:** "Play against Virgil" (`app.cpu = 1`: the human is player 0, Virgil gets `randomDeck()`, the first player is random, and there are no pass screens) and "Two players, one device" (hot-seat, `app.cpu = null`). `cpu` is stored in the save. Against the computer, the human always sits at the bottom and sees their own hand. `scheduleCpu()` runs after every render and performs one computer action per timeout (about 1s, or 2.6s to linger on a combat result). Clicks are ignored while the computer acts, except info and quit.
 
 - Hot-seat privacy: a pass-the-device screen between turns. The attacker's hand shows as card backs during the block phase. Chronicle log entries can carry a `secret: { player, text }` (e.g. drawn card names), shown only to the player holding the device; everyone else sees the public text.
 - The chronicle logs draws, Embers paid for each summon, discards, triggers, and combat results.
@@ -57,9 +64,9 @@ Two-player hot-seat card game in the browser. Each player is a "firecrafting wiz
 
 ## Ideas / future work
 
-The user asked for the first two items (2026-10-01) but said not to start them yet:
+The user asked for these (2026-10-01):
 
 - **Save & share decks.** Keep several named decks per player rather than one `firecraft.deck.N` slot. Share a deck as a compact code or URL (e.g. `?deck=` with the `{cardId: count}` map encoded), so this works without a server. Import validates the deck with `validateDeck`.
-- **Play between devices** (to replace single-device hot-seat). This needs a server: run `engine.js` on the server as the authority and send each player only their own view, so hands stay hidden and moves can't be cheated via dev tools. Players join a room via an invite link and need to be able to reconnect. Candidate hosts: PartyKit, Cloudflare Durable Objects, Supabase Realtime. GitHub Pages can keep serving the client.
+- **Play between devices**: built (2026-10-02) as described above. Still to do: real auth (passkeys or email magic links can be added as other ways to get a token), and moving players off GitHub Pages onto the workers.dev URL (a redirect page on Pages). Changing the saved game shape now also needs a migration for games stored on the server.
 - Planned: player-vs-Claude battles. The computer opponent (`ai.js`) already exists.
 - Balance: in 300 Virgil-vs-Virgil games the first player won about 55%. Skipping the first player's opening draw is the suggested fix (not yet done).

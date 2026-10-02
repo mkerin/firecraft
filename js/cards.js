@@ -8,6 +8,10 @@ export const RULES = {
   burnoutDamage: 5, // taken when you must draw from an empty deck
 };
 
+// Online play: bump this when the client/server messages or the rules change in a way that matters,
+// so players with an old page open are asked to refresh.
+export const PROTOCOL = 1;
+
 export const TYPES = ['brimstone', 'phlegethon', 'pyre', 'fallen', 'ash'];
 
 export const TYPE_INFO = {

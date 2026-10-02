@@ -462,3 +462,31 @@ h1, h2, h3, h4 { font-family: var(--display); margin: 0; letter-spacing: .04em; 
   .pool { grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); }
   .pass-card, .victory { padding: 1.8rem 1.4rem; }
 }
+
+/* ---------- online: sign-in and lobby ---------- */
+
+.lobby { max-width: 760px; margin: 0 auto; padding: 2rem 16px 4rem; display: flex; flex-direction: column; gap: 1.4rem; }
+.lobby.login { align-items: center; text-align: center; padding-top: 4rem; }
+.lobby section { background: var(--panel); border: 1px solid var(--line); border-radius: 10px; padding: 1rem 1.2rem; }
+.lobby h3 { font-family: var(--display); font-size: .9rem; letter-spacing: .12em; text-transform: uppercase; color: var(--fire-hot); margin: 0 0 .6rem; }
+.lobby h4 { font-family: var(--display); font-size: .7rem; letter-spacing: .12em; text-transform: uppercase; color: var(--muted); margin: 1rem 0 .4rem; }
+.lobby code { background: var(--panel-2); padding: .1em .4em; border-radius: 4px; user-select: all; word-break: break-all; }
+.lobby .msg { background: var(--panel-2); border-left: 3px solid var(--fire); }
+.lrows { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: .4rem; }
+.lrows > .muted { font-style: italic; }
+.lrow { display: flex; align-items: center; gap: .8rem; flex-wrap: wrap; padding: .5rem .7rem; border-radius: 6px; background: var(--panel-2); border: 1px solid transparent; }
+.lrow.hot { border-color: var(--fire); box-shadow: 0 0 10px #ff6a1a33; }
+.lrow .who { font-family: var(--display); flex: 1 1 10rem; display: flex; align-items: center; gap: .5rem; }
+.lrow .state { color: var(--muted); font-size: .9rem; flex: 1 1 12rem; }
+.lrow .state b { color: var(--fire-hot); }
+.online-dot { width: .55rem; height: .55rem; border-radius: 50%; background: var(--line); flex: none; }
+.online-dot.on { background: var(--good); box-shadow: 0 0 6px var(--good); }
+.login-form { display: flex; flex-direction: column; gap: 1rem; align-items: stretch; width: min(100%, 360px); }
+.login-form label { display: flex; flex-direction: column; gap: .3rem; font-family: var(--display); font-size: .75rem; color: var(--muted); letter-spacing: .1em; text-transform: uppercase; text-align: left; }
+.login-form input { font: inherit; font-family: var(--body); font-size: 1.05rem; letter-spacing: 0; text-transform: none; color: var(--text); background: var(--panel-2); border: 1px solid var(--line); border-radius: 6px; padding: .55em .7em; }
+.login-form input:focus { outline: none; border-color: var(--fire); box-shadow: 0 0 10px #ff6a1a55; }
+.login-form details { text-align: left; color: var(--muted); }
+.login-form summary { cursor: pointer; margin-bottom: .5rem; }
+.login-form .actions { justify-content: center; }
+.net-banner { background: #5a3a0a66; border-left: 3px solid var(--fire-hot); padding: .5em .8em; border-radius: 5px; display: flex; gap: .8rem; align-items: center; flex-wrap: wrap; }
+.sidebar .actions { display: flex; gap: .5rem; flex-wrap: wrap; }

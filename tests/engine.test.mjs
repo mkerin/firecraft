@@ -293,3 +293,38 @@ test('full random games run to completion', () => {
     assert.notEqual(s.winner, null, `seed ${seed} never finished`);
   }
 });
+
+test('viewFor hides the other hand, both decks, and other players\' secrets', () => {
+  const s = setup({ hand0: ['harpy', 'ember-ash'], hand1: ['shade'] });
+  const v = E.viewFor(s, 0);
+  assert.deepEqual(v.players[0].hand.map((c) => c.cardId), ['harpy', 'ember-ash']);
+  assert.deepEqual(v.players[1].hand, [{ hidden: true }]);
+  assert.equal(v.players[0].deck.length, s.players[0].deck.length);
+  assert.ok(v.players.every((p) => p.deck.every((c) => c.hidden && !c.cardId)));
+  assert.equal(v.rng, undefined);
+  const secrets = v.log.filter((e) => e.secret);
+  assert.ok(secrets.length > 0 && secrets.every((e) => e.secret.player === 0));
+  assert.ok(!JSON.stringify(E.viewFor(s, 1)).includes('opening hand: '.concat(s.players[0].name)));
+  assert.equal(s.players[1].hand[0].cardId, 'shade', 'the real state is untouched');
+});
+
+test('applyAction runs actions given as data and rejects malformed ones', () => {
+  const s = setup({ hand0: ['harpy', 'ember-ash'] });
+  assert.equal(E.actor(s).index, 0);
+  assert.ok(E.applyAction(s, { type: 'redraw' }).ok);
+  assert.equal(s.phase, 'attack');
+  assert.equal(E.applyAction(s, { type: 'attack', uids: 'nope' }).ok, false);
+  assert.equal(E.applyAction(s, { type: 'launch-missiles' }).ok, false);
+  assert.equal(E.applyAction(s, null).ok, false);
+  assert.ok(E.applyAction(s, { type: 'attack', uids: [] }).ok);
+  assert.ok(E.applyAction(s, { type: 'end-turn' }).ok);
+  assert.equal(E.actor(s).index, 1);
+});
+
+test('conceding ends the game for the other player', () => {
+  const s = setup();
+  assert.ok(E.concede(s, 0).ok);
+  assert.equal(s.winner, 1);
+  assert.equal(s.phase, 'gameover');
+  assert.equal(E.concede(s, 1).ok, false);
+});

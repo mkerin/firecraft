@@ -7,9 +7,8 @@
 import { card, hasAbility, RULES } from './cards.js';
 import * as E from './engine.js';
 
-export function actor(state) {
-  return state.phase === 'block' ? E.defendingPlayer(state) : E.activePlayer(state);
-}
+// The engine owns these so the server can use them too; re-exported for existing callers.
+export const { actor, applyAction } = E;
 
 // Rough worth of a creature on the field, in "health points".
 function worth(inst) {
@@ -122,17 +121,5 @@ export function chooseAction(state) {
       return { type: 'end-turn' };
     default:
       return null;
-  }
-}
-
-export function applyAction(state, action) {
-  switch (action.type) {
-    case 'summon': return E.summon(state, action.uid, { sacrificeUid: action.sacrificeUid });
-    case 'martyr': return E.martyr(state, action.owner, action.uid);
-    case 'to-attack': return E.goToAttack(state);
-    case 'attack': return E.declareAttack(state, action.uids);
-    case 'block': return E.declareBlock(state, action.blocks);
-    case 'end-turn': return E.endTurn(state);
-    default: return { ok: false, reason: `Unknown action ${action.type}` };
   }
 }

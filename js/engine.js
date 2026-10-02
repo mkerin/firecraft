@@ -465,3 +465,45 @@ export function declareBlock(state, blocks) {
   checkWinner(state);
   return OK;
 }
+
+// ---------- conceding ----------
+
+export function concede(state, pi) {
+  if (state.winner !== null) return fail('The game is over.');
+  state.winner = 1 - pi;
+  state.phase = 'gameover';
+  log(state, `${state.players[pi].name} concedes. ${state.players[state.winner].name} is victorious!`, 'win');
+  return OK;
+}
+
+// ---------- actions as data (for the computer player and the server) ----------
+
+// Whoever must act next: the defender during a block, otherwise the active player.
+export function actor(state) {
+  return state.phase === 'block' ? defendingPlayer(state) : activePlayer(state);
+}
+
+export function applyAction(state, action) {
+  switch (action?.type) {
+    case 'summon': return summon(state, action.uid, { sacrificeUid: action.sacrificeUid });
+    case 'martyr': return martyr(state, action.owner, action.uid);
+    case 'redraw': return redrawHand(state);
+    case 'to-attack': return goToAttack(state);
+    case 'attack': return Array.isArray(action.uids) ? declareAttack(state, action.uids) : fail('Bad attack.');
+    case 'block': return Array.isArray(action.blocks) ? declareBlock(state, action.blocks.map((b) => ({ ...b }))) : fail('Bad block.');
+    case 'end-turn': return endTurn(state);
+    default: return fail(`Unknown action ${action?.type}.`);
+  }
+}
+
+// What one player is allowed to see: the other hand and both decks become face-down placeholders,
+// and other players' secret log text is removed. The result is plain JSON with no rng.
+export function viewFor(state, seat) {
+  const hidden = (list) => list.map(() => ({ hidden: true }));
+  return {
+    ...state,
+    rng: undefined,
+    players: state.players.map((p) => ({ ...p, deck: hidden(p.deck), hand: p.index === seat ? p.hand : hidden(p.hand) })),
+    log: state.log.slice(-120).map(({ secret, ...e }) => (secret?.player === seat ? { ...e, secret } : e)),
+  };
+}
