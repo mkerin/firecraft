@@ -15,7 +15,8 @@ Two-player hot-seat card game in the browser. Each player is a "firecrafting wiz
 - Tests: `npm test` (Node's built-in `node:test`, `tests/engine.test.mjs`). Keep them green; add a test for every new rule.
 - Python lives in the project `.venv` (made with `uv`); it is only used to serve files.
 - Online, locally: the `firecraft-online` launch config runs `npx wrangler dev` on http://localhost:8787 (no Cloudflare login needed). Its database lives in `../.firecraft-dev-state`, outside the repo: inside the Dropbox-synced repo it made wrangler reload every second and drop every socket. Use `localhost` for one player and `127.0.0.1` for a second, since they are separate origins with separate storage.
-- `node server/smoke.mjs [url]` (with the server running) signs up two users, challenges, and plays a whole game over the socket with the AI. Run it after server changes.
+- `node server/smoke.mjs [url]` (with the server running) signs up two users, challenges, and plays a whole game over the socket with the AI. Run it after server changes. It leaves those users and the game behind, so never point it at the live server (it refuses unless given `--prod`).
+- **Test server:** `npx wrangler deploy --env test` publishes `firecraft-test` (https://firecraft-test.emberworks.workers.dev) with its own database. Deploy there and smoke-test it before deploying the live server.
 - Wrangler runs via `npx` (no `node_modules` in the Dropbox folder).
 
 ## Layout

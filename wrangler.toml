@@ -14,3 +14,12 @@ class_name = "World"
 [[migrations]]
 tag = "v1"
 new_sqlite_classes = ["World"]
+
+# Test server: `npx wrangler deploy --env test` publishes a separate Worker, firecraft-test, with its
+# own database, at https://firecraft-test.emberworks.workers.dev. Run smoke tests here, not on the live one.
+[env.test]
+name = "firecraft-test"
+
+[[env.test.durable_objects.bindings]]
+name = "WORLD"
+class_name = "World"

@@ -3,16 +3,9 @@
 // Turn flow: draw -> summon -> attack -> block (defender) -> end -> next player's draw.
 // Every action validates the phase and returns { ok, reason } instead of throwing on illegal moves.
 
-import { RULES, TYPES, TYPE_INFO, BEATS, BEAT_VERB, card, hasAbility } from './cards.js';
+import { RULES, TYPES, TYPE_INFO, BEATS, BEAT_VERB, card, hasAbility, shuffle } from './cards.js';
 
-export function shuffle(list, rng = Math.random) {
-  const a = [...list];
-  for (let i = a.length - 1; i > 0; i--) {
-    const j = Math.floor(rng() * (i + 1));
-    [a[i], a[j]] = [a[j], a[i]];
-  }
-  return a;
-}
+export { shuffle };
 
 export function createGame({ decks, names = ['Player 1', 'Player 2'], rng = Math.random, firstPlayer = 0 }) {
   let uid = 1;

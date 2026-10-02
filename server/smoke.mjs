@@ -1,10 +1,17 @@
 // End-to-end check against a running server: two new users, a challenge, and a full game played by the
 // computer player through the socket. Run `npx wrangler dev` first, then `node server/smoke.mjs [url]`.
+// For a deployed check, use the test server: `node server/smoke.mjs https://firecraft-test.emberworks.workers.dev`.
 
 import { PROTOCOL, randomDeck } from '../js/cards.js';
 import * as AI from '../js/ai.js';
 
 const base = process.argv[2] || 'http://localhost:8787';
+// Each run signs up two users and plays a game, so keep it off the live server and its real players.
+if (new URL(base).hostname === 'firecraft.emberworks.workers.dev' && !process.argv.includes('--prod')) {
+  console.error('Refusing to fill the live database with test users. Use the test server,');
+  console.error('https://firecraft-test.emberworks.workers.dev, or pass --prod if you really mean it.');
+  process.exit(1);
+}
 const assert = (ok, what) => { if (!ok) { console.error('FAIL:', what); process.exit(1); } console.log('ok  ', what); };
 
 async function login(body) {

@@ -134,6 +134,16 @@ export const CARDS = [
     { id: 'ember-wild', maxCopies: 2 }),
 ];
 
+// Fisher–Yates: every order is equally likely. Lives here so engine.js can import it without a cycle.
+export function shuffle(list, rng = Math.random) {
+  const a = [...list];
+  for (let i = a.length - 1; i > 0; i--) {
+    const j = Math.floor(rng() * (i + 1));
+    [a[i], a[j]] = [a[j], a[i]];
+  }
+  return a;
+}
+
 export const CARDS_BY_ID = Object.fromEntries(CARDS.map((c) => [c.id, c]));
 
 export const card = (idOrInstance) =>
@@ -212,7 +222,7 @@ export function fillWithEmbers(counts) {
 
 // A playable random deck: two or three types, ~22 creatures, the rest Embers.
 export function randomDeck(rng = Math.random) {
-  const types = [...TYPES].sort(() => rng() - 0.5).slice(0, rng() < 0.5 ? 2 : 3);
+  const types = shuffle(TYPES, rng).slice(0, rng() < 0.5 ? 2 : 3);
   const pool = CARDS.filter((c) => c.kind === 'creature' && types.includes(c.type) && !c.costEach);
   const counts = {};
   const target = 20 + Math.floor(rng() * 5);

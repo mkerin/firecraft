@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { RULES, card, validateDeck, randomDeck, fillWithEmbers, deckSize, deckToList } from '../js/cards.js';
+import { RULES, TYPES, card, validateDeck, randomDeck, fillWithEmbers, deckSize, deckToList } from '../js/cards.js';
 import * as E from '../js/engine.js';
 
 // Deterministic RNG so shuffles and random discards are repeatable.
@@ -384,4 +384,20 @@ test('Soothsayer draws an extra card at the start of its owner\'s turn, without 
   E.goToAttack(s); E.declareAttack(s, []); E.endTurn(s);
   E.goToAttack(s); E.declareAttack(s, []); E.endTurn(s);
   assert.equal(p.health, RULES.startingHealth, 'the regular draw took the last card; Foresight finds nothing');
+});
+
+test('random decks pick each type about equally often', () => {
+  const rng = seeded(7);
+  const picks = Object.fromEntries(TYPES.map((t) => [t, 0]));
+  const decks = 2000;
+  for (let i = 0; i < decks; i++) {
+    const counts = randomDeck(rng);
+    const types = new Set(Object.keys(counts).map(card).filter((d) => d.kind === 'creature').map((d) => d.type));
+    for (const t of types) picks[t]++;
+  }
+  // Each deck has 2 or 3 types, so each type should appear in about half of them.
+  const expected = (decks * 2.5) / TYPES.length;
+  for (const t of TYPES) {
+    assert.ok(Math.abs(picks[t] - expected) < expected * 0.1, `${t} picked ${picks[t]} times, expected about ${expected}`);
+  }
 });
