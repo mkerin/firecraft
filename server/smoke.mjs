@@ -75,14 +75,18 @@ while (players[0].game.view.winner === null && moves < 2000) {
     assert(other.errors.at(-1) === 'It is not your move.', 'players cannot act out of turn');
   }
   const action = AI.chooseAction({ ...me.game.view, rng: Math.random });
+  const errorsBefore = me.errors.length;
   me.send({ type: 'act', game: opened.id, action });
   await Promise.all(players.map((p) => p.next((m) => m.type === 'game' || m.type === 'error')));
-  if (me.errors.length > 1) { console.error(action, me.errors); process.exit(1); }
+  if (me.errors.length > errorsBefore) { console.error(action, me.errors.slice(errorsBefore)); process.exit(1); }
   moves++;
 }
 const final = players[0].game.view;
 assert(final.winner !== null, `a full game finishes (${moves} moves, ${final.players[final.winner].name} won)`);
-assert(a.lobby.games.find((g) => g.id === opened.id).finished, 'the lobby marks it finished');
+// The lobby update can arrive just after the final game view.
+const isFinished = (lobby) => lobby?.games.find((g) => g.id === opened.id)?.finished;
+if (!isFinished(a.lobby)) await a.next((m) => m.type === 'lobby' && isFinished(m)).catch(() => {});
+assert(isFinished(a.lobby), 'the lobby marks it finished');
 
 a.ws.close();
 b.ws.close();
